@@ -6,6 +6,15 @@ from datetime import datetime
 from deap import tools
 from deap import algorithms
 import numpy as np
+from deap import base
+from deap import creator
+from deap import tools
+
+import random
+import numpy
+
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def eaSimpleWithElitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
@@ -111,7 +120,7 @@ class Person:
     def get_bin_assignment(self):
         return self.bin_assign
 
-    def is_board(self):
+    def get_is_board(self):
         return self.is_board
 
     def get_max_shifts(self):
@@ -184,15 +193,14 @@ class RoomResponsibleSchedulingProblem:
     """This class encapsulates the Nurse Scheduling problem
     """
 
-    def __init__(self, hard_constraint_penalty):
-        self.hard_constraint_penalty = hard_constraint_penalty
+    def __init__(self):
 
         self.people = PERSONS
 
         self.people_per_shift = 2
 
     def __len__(self):
-        return len(DATES) * len(SHIFTS)
+        return len(DATES) * len(SHIFTS) * len(PERSONS)
 
     def get_room_responsible_shifts(self, schedule):
         shifts_per_person = self.__len__() // len(self.people)
@@ -205,13 +213,32 @@ class RoomResponsibleSchedulingProblem:
 
         return person_shift_dict
 
+    def get_cost(self, schedule):
+        if len(schedule) != self.__len__():
+            raise ValueError(f'Size of schedule list should be equal to: {self.__len__()}')
+
+        shifts_dict = self.get_room_responsible_shifts(schedule)
+
+        board_violations = self.count_board_violations(schedule)
+        max_shift_violations = self.count_max_shift_violations(shifts_dict)
+        people_per_shift_violations = self.count_people_per_shift_violations(shifts_dict)
+        non_board_violations = self.count_non_board_violations(schedule)
+        consecutive_shift_violations = self.count_consecutive_shift_violations(shifts_dict)
+        preference_violations = self.count_preference_violations(shifts_dict)
+
+        violations = [board_violations, max_shift_violations, people_per_shift_violations, non_board_violations,
+                      consecutive_shift_violations, preference_violations]
+        weights = [100, 1, 100, 1, 1, 100]
+
+        return sum(v * w for v, w in zip(violations, weights))
+
     def count_board_violations(self, schedule):
         violations = 0
         shifts_per_person = self.__len__() // len(self.people)
         for i in range(shifts_per_person):
             board_assigned = False
             for j in range(len(self.people)):
-                if schedule[j*shifts_per_person+i] == 1 and PERSONS[j].is_board():
+                if schedule[j * shifts_per_person + i] == 1 and PERSONS[j].get_is_board():
                     board_assigned = True
             if not board_assigned:
                 violations += 1
@@ -225,6 +252,7 @@ class RoomResponsibleSchedulingProblem:
             if max_shifts == -1:
                 continue
             violations += max([0, (shift_count - max_shifts // 4)])
+        return violations
 
     def count_people_per_shift_violations(self, personalized_schedule):
         return sum(1 for shift in zip(*personalized_schedule.values()) if sum(shift) != self.people_per_shift)
@@ -235,7 +263,8 @@ class RoomResponsibleSchedulingProblem:
         for i in range(shifts_per_person):
             non_board_assigned = False
             for j in range(len(self.people)):
-                if schedule[j*shifts_per_person+i] == 1 and not PERSONS[j].is_board():
+                # print(schedule[j*shifts_per_person+i] == 1 and not bool(PERSONS[j].get_is_board()))
+                if schedule[j * shifts_per_person + i] == 1 and not bool(PERSONS[j].get_is_board()):
                     non_board_assigned = True
             if not non_board_assigned:
                 violations += 1
@@ -252,9 +281,13 @@ class RoomResponsibleSchedulingProblem:
     def count_preference_violations(self, personalized_schedule):
         violations = 0
         for i in PERSONS:
-            preferences = i.get_bin_preference
+            preferences = i.get_bin_preference()
             for j in range(len(personalized_schedule[i.get_name()])):
-                if preferences[j] == 0 and personalized_schedule[i.get_name][j] == 1:
+                # print(f'Values for {i.get_name()}')
+                # print(f'value of j is {j}')
+                # print(f'value of schedule is {personalized_schedule[i.get_name()]}')
+                # print(f'value of preferences is {preferences}')
+                if preferences[j] == 0 and personalized_schedule[i.get_name()][j] == 1:
                     violations += 1
 
         return violations
@@ -270,10 +303,12 @@ class RoomResponsibleSchedulingProblem:
         print(f'Board violations: {self.count_board_violations(schedule)} \n')
         print(f'Weekly Shift Violations: {self.count_max_shift_violations(shifts_dict)} \n')
         print(f'People per shift violations: {self.count_people_per_shift_violations(shifts_dict)} \n')
-        print(f'Non board violations: {self.count_non_board_violations(shifts_dict)} \n')
+        print(f'Non board violations: {self.count_non_board_violations(schedule)} \n')
         print(f'Consecutive shift violations: {self.count_consecutive_shift_violations(shifts_dict)} \n')
         print(f'Preference violations {self.count_preference_violations(shifts_dict)} \n')
-
+        print("Shifts per person")
+        for person in PERSONS:
+            print(f'{person.get_name()}: {sum(shifts_dict[person.get_name()])}')
 
 
 DATES = []
@@ -291,6 +326,7 @@ def read_availabilities(csv_name):
 
         # read all lines
         for line in file:
+            # print(line)
             # read first line, which are the shifts
             if index == 0:
                 shifts = list(filter(None, line.rstrip().split(";")))
@@ -303,15 +339,16 @@ def read_availabilities(csv_name):
             elif index == 2:
                 max_shifts = list(filter(None, line.rstrip().split(";")))
                 for i in range(1, len(max_shifts)):
-                    PERSONS[i - 1].set_max_shifts(max_shifts[i])
+                    PERSONS[i - 1].set_max_shifts(int(max_shifts[i]))
             elif index == 3:
                 board = list(filter(None, line.rstrip().split(";")))
                 for i in range(1, len(board)):
-                    PERSONS[i - 1].set_board(board[i])
+                    PERSONS[i - 1].set_board(int(board[i]))
             else:
                 data = line.rstrip().split(";")
                 DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%m/%d/%Y")))
-                availabilities = line.split(';')[(len(PERSONS) - 1):]
+                availabilities = line.split(';')[3:]
+                print(availabilities)
                 for i in SHIFTS:
                     DATES[index - 4].add_shift(copy.deepcopy(i))
                 for i, v in enumerate(availabilities):
@@ -322,10 +359,22 @@ def read_availabilities(csv_name):
                         else:
                             PERSONS[i].bin_preference.append(0)
             index += 1
-        # for date in DATES:
-        #     print(date)
-        for person in PERSONS:
-            print(len(person.bin_preference))
+
+
+# Genetic Algorithm constants:
+POPULATION_SIZE = 300
+P_CROSSOVER = 0.9  # probability for crossover
+P_MUTATION = 0.1  # probability for mutating an individual
+MAX_GENERATIONS = 1000
+HALL_OF_FAME_SIZE = 30
+
+# set the random seed:
+RANDOM_SEED = 42
+random.seed(RANDOM_SEED)
+
+toolbox = base.Toolbox()
+
+# rrsp = RoomResponsibleSchedulingProblem()
 
 
 if __name__ == "__main__":
@@ -333,3 +382,62 @@ if __name__ == "__main__":
         file_name = sys.argv[1] if ".csv" in sys.argv[1] else sys.argv[1] + ".csv"
         if os.path.isfile(file_name):
             read_availabilities(file_name)
+            rrsp = RoomResponsibleSchedulingProblem()
+
+            # random_solution = np.random.randint(2, size=len(scheduling_problem))
+            # print("Random solution is")
+            # print(random_solution)
+            #
+            # scheduling_problem.print_schedule_info(random_solution)
+            # print(f'Total cost = {scheduling_problem.get_cost(random_solution)}')
+
+            # define a single objective, maximizing fitness strategy:
+            creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+
+            # create the Individual class based on list:
+            creator.create("Individual", list, fitness=creator.FitnessMin)
+
+            # create an operator that randomly returns 0 or 1:
+            toolbox.register("zeroOrOne", random.randint, 0, 1)
+
+            # create the individual operator to fill up an Individual instance:
+            toolbox.register("individualCreator", tools.initRepeat, creator.Individual, toolbox.zeroOrOne, len(rrsp))
+
+            # create the population operator to generate a list of individuals:
+            toolbox.register("populationCreator", tools.initRepeat, list, toolbox.individualCreator)
+
+
+            # fitness calculation
+            def get_cost(individual):
+                return rrsp.get_cost(individual),  # return a tuple
+
+
+            toolbox.register("evaluate", get_cost)
+
+            # genetic operators:
+            toolbox.register("select", tools.selTournament, tournsize=2)
+            toolbox.register("mate", tools.cxTwoPoint)
+            toolbox.register("mutate", tools.mutFlipBit, indpb=1.0 / len(rrsp))
+
+            # create initial population (generation 0):
+            population = toolbox.populationCreator(n=POPULATION_SIZE)
+
+            # prepare the statistics object:
+            stats = tools.Statistics(lambda ind: ind.fitness.values)
+            stats.register("min", numpy.min)
+            stats.register("avg", numpy.mean)
+
+            # define the hall-of-fame object:
+            hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
+
+            # perform the Genetic Algorithm flow with hof feature added:
+            population, logbook = eaSimpleWithElitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
+                                                      ngen=MAX_GENERATIONS, stats=stats, halloffame=hof, verbose=True)
+
+            # print best solution found:
+            best = hof.items[0]
+            print("-- Best Individual = ", best)
+            print("-- Best Fitness = ", best.fitness.values[0])
+            print()
+            print("-- Schedule = ")
+            rrsp.print_schedule_info(best)
