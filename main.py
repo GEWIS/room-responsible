@@ -63,6 +63,9 @@ class Date:
     def is_exams(self):
         return self.exams
 
+    def get_shifts(self):
+        return self.shifts
+
     def __str__(self):
         string = f'Date({self.date}), consisting of shifts: \n'
         for i in self.shifts:
@@ -76,6 +79,7 @@ class Shift:
         self.end = datetime.strptime(end, "%H:%M:%S")
         self.indicator = indicator
         self.available_people = []
+        self.assigned_people = []
 
     def __str__(self):
         string = f'Shift ({self.indicator}, {datetime.strftime(self.start, "%H:%M:%S")} - {datetime.strftime(self.end, "%H:%M:%S")}), filled by: '
@@ -89,6 +93,8 @@ class Shift:
     def get_indicator(self):
         return self.indicator
 
+    def assign_person(self, person):
+        self.assigned_people.append(person)
 
 DATES = []
 PERSONS = []
@@ -124,10 +130,15 @@ def read_availabilities(csv_name):
                     PERSONS[i - 1].set_board(board[i])
             else:
                 data = line.rstrip().split(";")
-                print(int(data[2]), int(data[1]), datetime.strptime(data[0], "%m/%d/%Y"))
                 DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%m/%d/%Y")))
+                availabilities = line.split(';')[(len(PERSONS) - 1):]
                 for i in SHIFTS:
-                    DATES[index - 4].add_shift(copy.copy(i))
+                    DATES[index - 4].add_shift(copy.deepcopy(i))
+                for i, v in enumerate(availabilities):
+
+                    for j in DATES[index - 4].get_shifts():
+                        if j.get_indicator() in v:
+                            j.add_available_person(PERSONS[i])
             index += 1
         for date in DATES:
             print(date)
