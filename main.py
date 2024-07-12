@@ -80,21 +80,18 @@ def eaSimpleWithElitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
 class Person:
     def __init__(self, name):
         self.name = name
-        self.weekcounter = 0
-        self.morningweekcounter = 0
-        self.afternoonweekcounter = 0
-        self.totalcounter = 0
-        self.morningcounter = 0
-        self.afternooncounter = 0
         self.calendar = []
         self.non_busy = 0
         self.busy = 0
-        self.ingeroosterdochtend = 0
-        self.ingeroosterdmiddag = 0
         self.is_board = False
         self.max_shifts = -1
         self.bin_preference = []
         self.bin_assign = []
+        self.shift_assigned = {}
+        for i in SHIFTS:
+            self.shift_assigned[i.get_indicator()] = 0
+        self.assigned = 0
+        self.available = 0
 
     def set_board(self, val):
         self.is_board = val
@@ -105,11 +102,21 @@ class Person:
     def __str__(self):
         return f'Person({self.name}, {self.is_board}, {self.max_shifts})'
 
+    def add_indicated_shift(self, indicator):
+        self.shift_assigned[indicator] += 1
+
     def get_name(self):
         return self.name
 
+    def get_available(self):
+        return self.available
+
+    def get_total(self):
+        return self.assigned
+
     def set_bin_preference(self, preferred_list):
         self.bin_preference = preferred_list
+        self.available = sum(preferred_list)
 
     def set_bin_assignment(self, assignment_list):
         self.bin_assign = assignment_list
@@ -126,11 +133,18 @@ class Person:
     def get_max_shifts(self):
         return self.max_shifts
 
+    def get_indicated_shift(self, indicator):
+        return self.shift_assigned[indicator]
+
     def assign_from_bin(self):
         for i in range(len(DATES)):
             for j in range(len(SHIFTS)):
                 if self.bin_assign[i * len(SHIFTS) + j] == 1:
                     DATES[i].get_shifts()[j].assign_person(self)
+                    self.add_indicated_shift(SHIFTS[j].get_indicator())
+                    self.assigned += 1
+        self.available = sum(self.bin_assign)
+
 
 
 class Date:
@@ -342,6 +356,8 @@ def get_person_by_name(name):
 
 def print_results():
     global NO_ONE
+
+    # Write resulting shifts to file
     file = open('OpenhoudenResults.csv', 'w')
     file.write(f'Subject, Start Date, Start Time, End Date, End Time \n')
     for date in DATES:
@@ -353,6 +369,24 @@ def print_results():
             room_responsible_shift += f'{datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_start_time(), "%H:%M:%S")}, {datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_end_time(), "%H:%M:%S")} \n'
             file.write(room_responsible_shift)
     file.close()
+
+    with open("OpenhouderStats.csv", "w") as file:
+        file.write("STATS\n")
+
+        # Create headers for each person
+        headers = f'Shift\\Person,' + ','.join([person.get_name() for person in PERSONS]) + '\n'
+        file.write(headers)
+
+        # Write availability and total assignments
+        file.write('Available,' + ','.join(str(person.get_available()) for person in PERSONS) + '\n')
+        file.write('Total,' + ','.join(str(person.get_total()) for person in PERSONS) + '\n')
+
+        # Write shift assignment information
+        for shift in SHIFTS:
+            shift_row = [shift.get_indicator()]
+            for person in PERSONS:
+                shift_row.append(str(person.get_indicated_shift(shift.get_indicator())))
+            file.write(','.join(shift_row) + '\n')
 
 DATES = []
 PERSONS = []
