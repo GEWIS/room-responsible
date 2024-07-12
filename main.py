@@ -126,6 +126,12 @@ class Person:
     def get_max_shifts(self):
         return self.max_shifts
 
+    def assign_from_bin(self):
+        for i in range(len(DATES)):
+            for j in range(len(SHIFTS)):
+                if self.bin_assign[i * len(SHIFTS) + j] == 1:
+                    DATES[i].get_shifts()[j].assign_person(self)
+
 
 class Date:
     def __init__(self, exams, is_monday, date):
@@ -158,6 +164,9 @@ class Date:
     def get_shifts(self):
         return self.shifts
 
+    def get_date(self):
+        return self.date
+
     def __str__(self):
         string = f'Date({self.date}), consisting of shifts: \n'
         for i in self.shifts:
@@ -175,12 +184,15 @@ class Shift:
 
     def __str__(self):
         string = f'Shift ({self.indicator}, {datetime.strftime(self.start, "%H:%M:%S")} - {datetime.strftime(self.end, "%H:%M:%S")}), filled by: '
-        for i in self.available_people:
+        for i in self.assigned_people:
             string += f'{i.get_name()}, '
         return string
 
     def add_available_person(self, person):
         self.available_people.append(person)
+
+    def assign_person(self, person):
+        self.assigned_people.append(person)
 
     def get_indicator(self):
         return self.indicator
@@ -188,6 +200,14 @@ class Shift:
     def assign_person(self, person):
         self.assigned_people.append(person)
 
+    def get_assigned_persons(self):
+        return self.assigned_people
+
+    def get_start_time(self):
+        return self.start
+
+    def get_end_time(self):
+        return self.end
 
 class RoomResponsibleSchedulingProblem:
     """This class encapsulates the Nurse Scheduling problem
@@ -228,7 +248,7 @@ class RoomResponsibleSchedulingProblem:
 
         violations = [board_violations, max_shift_violations, people_per_shift_violations, non_board_violations,
                       consecutive_shift_violations, preference_violations]
-        weights = [100, 1, 100, 1, 1, 100]
+        weights = [300, 10, 1000, 100, 5, 2000]
 
         return sum(v * w for v, w in zip(violations, weights))
 
@@ -299,6 +319,9 @@ class RoomResponsibleSchedulingProblem:
         print("Schedule for each room responsible")
         for person in shifts_dict:
             print(f'{person} : {shifts_dict[person]}')
+            person_object = get_person_by_name(person)
+            person_object.set_bin_assignment(shifts_dict[person])
+            # person_object.assign_from_bin()
 
         print(f'Board violations: {self.count_board_violations(schedule)} \n')
         print(f'Weekly Shift Violations: {self.count_max_shift_violations(shifts_dict)} \n')
@@ -310,6 +333,26 @@ class RoomResponsibleSchedulingProblem:
         for person in PERSONS:
             print(f'{person.get_name()}: {sum(shifts_dict[person.get_name()])}')
 
+def get_person_by_name(name):
+    global PERSONS
+
+    for i in PERSONS:
+        if i.get_name() == name:
+            return i
+
+def print_results():
+    global NO_ONE
+    file = open('OpenhoudenResults.csv', 'w')
+    file.write(f'Subject, Start Date, Start Time, End Date, End Time \n')
+    for date in DATES:
+        for shift in date.get_shifts():
+            room_responsible_shift = ""
+            while len(shift.get_assigned_persons()) < 2:
+                shift.assign_person(copy.deepcopy(NO_ONE))
+            room_responsible_shift += f'{shift.get_assigned_persons()[0].get_name()} & {shift.get_assigned_persons()[1].get_name()},'
+            room_responsible_shift += f'{datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_start_time(), "%H:%M:%S")}, {datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_end_time(), "%H:%M:%S")} \n'
+            file.write(room_responsible_shift)
+    file.close()
 
 DATES = []
 PERSONS = []
@@ -361,10 +404,11 @@ def read_availabilities(csv_name):
             index += 1
 
 
+
 # Genetic Algorithm constants:
 POPULATION_SIZE = 300
 P_CROSSOVER = 0.9  # probability for crossover
-P_MUTATION = 0.1  # probability for mutating an individual
+P_MUTATION = 0.2  # probability for mutating an individual
 MAX_GENERATIONS = 1000
 HALL_OF_FAME_SIZE = 30
 
@@ -441,3 +485,8 @@ if __name__ == "__main__":
             print()
             print("-- Schedule = ")
             rrsp.print_schedule_info(best)
+
+            for i in PERSONS:
+                i.assign_from_bin()
+
+            print_results()
