@@ -384,8 +384,9 @@ def print_results():
 
     for date in DATES:
         for shift in date.get_shifts():
+            assigned_persons = shift.get_assigned_persons()
             event = Event()
-            event.add('summary', ' & '.join([person.get_name() for person in shift.get_assigned_persons()]))
+            event.add('summary', ' & '.join([person.get_name() for person in assigned_persons]))
             event.add('dtstart', datetime.combine(date.get_date(), shift.get_start_time().time()))
             event.add('dtend', datetime.combine(date.get_date(), shift.get_end_time().time()))
             event.add('dtstamp', datetime.now())
@@ -393,13 +394,17 @@ def print_results():
             event.add('description', 'Room Responsible Shift')
 
             cal.add_component(event)
-
+            for person in assigned_persons:
+                person.get_calendar().add_component(event)
 
 
     with open('OpenhoudenSchedule.ics', 'wb') as file:
         file.write(cal.to_ical())
+    for person in PERSONS:
+        with open(f'schedules/Openhouden{person.get_name()}.ics', 'wb') as file:
+            file.write(person.get_calendar().to_ical())
 
-    print("iCalendar file created succesfully")
+    print("iCalendar files created succesfully")
 
 DATES = []
 PERSONS = []
@@ -454,7 +459,7 @@ def read_availabilities(csv_name):
 POPULATION_SIZE = 300
 P_CROSSOVER = 0.9  # probability for crossover
 P_MUTATION = 0.2  # probability for mutating an individual
-MAX_GENERATIONS = 50
+MAX_GENERATIONS = 1000
 HALL_OF_FAME_SIZE = 30
 
 # set the random seed:
