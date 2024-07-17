@@ -3,6 +3,7 @@ import copy
 import os.path
 import sys
 from datetime import datetime
+import vobject
 from deap import tools
 from deap import algorithms
 import numpy as np
@@ -388,6 +389,21 @@ def print_results():
                 shift_row.append(str(person.get_indicated_shift(shift.get_indicator())))
             file.write(','.join(shift_row) + '\n')
 
+    # Create iCal file with events
+    cal = vobject.iCalendar()
+    for date in DATES:
+        for shift in date.get_shifts():
+            event = cal.add('vevent')
+            event.add('dtstart').value = datetime.combine(date.get_date(), shift.get_start_time().time())
+            event.add('dtend').value = datetime.combine(date.get_date(), shift.get_end_time().time())
+            event.add('summary').value = f'Shift {shift.get_indicator()}'
+            event.add('description').value = f'{", ".join([p.get_name() for p in shift.get_assigned_persons()])} assigned'
+            event.prettyPrint()
+
+    with open('OpenhoudenSchedule.ics', 'w') as ics_file:
+        ics_file.write(cal.serialize())
+        print('iCal file OpenhoudenSchedule.ics created successfully')
+
 DATES = []
 PERSONS = []
 SHIFTS = []
@@ -443,7 +459,7 @@ def read_availabilities(csv_name):
 POPULATION_SIZE = 300
 P_CROSSOVER = 0.9  # probability for crossover
 P_MUTATION = 0.2  # probability for mutating an individual
-MAX_GENERATIONS = 1000
+MAX_GENERATIONS = 50
 HALL_OF_FAME_SIZE = 30
 
 # set the random seed:
