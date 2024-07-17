@@ -89,6 +89,7 @@ class Person:
             self.shift_assigned[i.get_indicator()] = 0
         self.assigned = 0
         self.available = 0
+        self.events = []
 
     def set_board(self, val):
         self.is_board = val
@@ -141,6 +142,9 @@ class Person:
                     self.add_indicated_shift(SHIFTS[j].get_indicator())
                     self.assigned += 1
         self.available = sum(self.bin_assign)
+
+    def add_event(self, event):
+        self.events.append(event)
 
 class Date:
     def __init__(self, exams, is_monday, date):
@@ -381,17 +385,6 @@ def print_results():
             for person in PERSONS:
                 shift_row.append(str(person.get_indicated_shift(shift.get_indicator())))
             file.write(','.join(shift_row) + '\n')
-
-    # Create iCal file with events
-    # cal = vobject.iCalendar()
-    # for date in DATES:
-    #     for shift in date.get_shifts():
-    #         event = cal.add('vevent')
-    #         event.add('dtstart').value = datetime.combine(date.get_date(), shift.get_start_time().time())
-    #         event.add('dtend').value = datetime.combine(date.get_date(), shift.get_end_time().time())
-    #         event.add('summary').value = f'Shift {shift.get_indicator()}'
-    #         event.add('description').value = f'{", ".join([p.get_name() for p in shift.get_assigned_persons()])} assigned'
-    #         event.prettyPrint()
 
     cal = Calendar()
 
