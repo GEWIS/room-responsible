@@ -10,8 +10,7 @@ from deap import tools
 from icalendar import Calendar, Event
 import random
 import numpy
-
-
+import argparse
 
 class Person:
     def __init__(self, name):
@@ -403,7 +402,7 @@ DATES = []
 PERSONS = []
 SHIFTS = []
 NO_ONE = Person("Get Room Responsible")
-
+file_name = "availability.csv"
 
 def read_availabilities(csv_name):
     global SHIFTS
@@ -452,9 +451,11 @@ def read_availabilities(csv_name):
 POPULATION_SIZE = 300
 P_CROSSOVER = 0.9  # probability for crossover
 P_MUTATION = 0.2  # probability for mutating an individual
-MAX_GENERATIONS = 1000
+max_generations = 1000
 HALL_OF_FAME_SIZE = 30
-
+parser = argparse.ArgumentParser(description="List of arguments")
+parser.add_argument("-g", "--generations", help = "How many generations should be run")
+parser.add_argument("-i", "--input", help="Input file path")
 # set the random seed:
 RANDOM_SEED = 42
 random.seed(RANDOM_SEED)
@@ -462,64 +463,69 @@ random.seed(RANDOM_SEED)
 toolbox = base.Toolbox()
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        file_name = sys.argv[1] if ".csv" in sys.argv[1] else sys.argv[1] + ".csv"
-        if os.path.isfile(file_name):
-            read_availabilities(file_name)
-            rrsp = RoomResponsibleSchedulingProblem()
 
-            # define a single objective, maximizing fitness strategy:
-            creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+    args = parser.parse_args()
+    if args.generations:
+        max_generations = int(args.generations)
+    if args.input:
+        file_name = args.input
 
-            # create the Individual class based on list:
-            creator.create("Individual", list, fitness=creator.FitnessMin)
+    if os.path.isfile(file_name):
+        read_availabilities(file_name)
+        rrsp = RoomResponsibleSchedulingProblem()
 
-            # create an operator that randomly returns 0 or 1:
-            toolbox.register("zeroOrOne", random.randint, 0, 1)
+        # define a single objective, maximizing fitness strategy:
+        creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
 
-            # create the individual operator to fill up an Individual instance:
-            toolbox.register("individualCreator", tools.initRepeat, creator.Individual, toolbox.zeroOrOne, len(rrsp))
+        # create the Individual class based on list:
+        creator.create("Individual", list, fitness=creator.FitnessMin)
 
-            # create the population operator to generate a list of individuals:
-            toolbox.register("populationCreator", tools.initRepeat, list, toolbox.individualCreator)
+        # create an operator that randomly returns 0 or 1:
+        toolbox.register("zeroOrOne", random.randint, 0, 1)
+
+        # create the individual operator to fill up an Individual instance:
+        toolbox.register("individualCreator", tools.initRepeat, creator.Individual, toolbox.zeroOrOne, len(rrsp))
+
+        # create the population operator to generate a list of individuals:
+        toolbox.register("populationCreator", tools.initRepeat, list, toolbox.individualCreator)
 
 
-            # fitness calculation
-            def get_cost(individual):
-                return rrsp.get_cost(individual),  # return a tuple
+        # fitness calculation
+        def get_cost(individual):
+            return rrsp.get_cost(individual),  # return a tuple
 
 
-            toolbox.register("evaluate", get_cost)
+        toolbox.register("evaluate", get_cost)
 
-            # genetic operators:
-            toolbox.register("select", tools.selTournament, tournsize=2)
-            toolbox.register("mate", tools.cxTwoPoint)
-            toolbox.register("mutate", tools.mutFlipBit, indpb=1.0 / len(rrsp))
+        # genetic operators:
+        toolbox.register("select", tools.selTournament, tournsize=2)
+        toolbox.register("mate", tools.cxTwoPoint)
+        toolbox.register("mutate", tools.mutFlipBit, indpb=1.0 / len(rrsp))
 
-            # create initial population (generation 0):
-            population = toolbox.populationCreator(n=POPULATION_SIZE)
+        # create initial population (generation 0):
+        population = toolbox.populationCreator(n=POPULATION_SIZE)
 
-            # prepare the statistics object:
-            stats = tools.Statistics(lambda ind: ind.fitness.values)
-            stats.register("min", numpy.min)
-            stats.register("avg", numpy.mean)
+        # prepare the statistics object:
+        stats = tools.Statistics(lambda ind: ind.fitness.values)
+        stats.register("min", numpy.min)
+        stats.register("avg", numpy.mean)
 
-            # define the hall-of-fame object:
-            hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
+        # define the hall-of-fame object:
+        hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
 
-            # perform the Genetic Algorithm flow with hof feature added:
-            population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
-                                                         ngen=MAX_GENERATIONS, stats=stats, halloffame=hof, verbose=True)
+        # perform the Genetic Algorithm flow with hof feature added:
+        population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
+                                                     ngen=max_generations, stats=stats, halloffame=hof, verbose=True)
 
-            # print best solution found:
-            best = hof.items[0]
-            print("-- Best Individual = ", best)
-            print("-- Best Fitness = ", best.fitness.values[0])
-            print()
-            print("-- Schedule = ")
-            rrsp.print_schedule_info(best)
+        # print best solution found:
+        best = hof.items[0]
+        print("-- Best Individual = ", best)
+        print("-- Best Fitness = ", best.fitness.values[0])
+        print()
+        print("-- Schedule = ")
+        rrsp.print_schedule_info(best)
 
-            for i in PERSONS:
-                i.assign_from_bin()
+        for i in PERSONS:
+            i.assign_from_bin()
 
-            print_results()
+        print_results()
