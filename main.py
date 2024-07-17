@@ -8,13 +8,11 @@ from deap import base
 from deap import creator
 from deap import tools
 from icalendar import Calendar, Event
-
 import random
 import numpy
 
-
-def eaSimpleWithElitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
-                        halloffame=None, verbose=__debug__):
+def ea_simple_with_elitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
+                           halloffame=None, verbose=__debug__):
     """This algorithm is similar to DEAP eaSimple() algorithm, with the modification that
     halloffame is used to implement an elitism mechanism. The individuals contained in the
     halloffame are directly injected into the next generation and are not subject to the
@@ -71,7 +69,6 @@ def eaSimpleWithElitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
             print(logbook.stream)
 
     return population, logbook
-
 
 class Person:
     def __init__(self, name):
@@ -168,9 +165,6 @@ class Date:
     def add_shift(self, shift):
         self.shifts.append(shift)
 
-    def is_afternoon(self):
-        return self.afternoon
-
     def is_exams(self):
         return self.exams
 
@@ -208,9 +202,6 @@ class Shift:
 
     def get_indicator(self):
         return self.indicator
-
-    def assign_person(self, person):
-        self.assigned_people.append(person)
 
     def get_assigned_persons(self):
         return self.assigned_people
@@ -515,8 +506,8 @@ if __name__ == "__main__":
             hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
 
             # perform the Genetic Algorithm flow with hof feature added:
-            population, logbook = eaSimpleWithElitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
-                                                      ngen=MAX_GENERATIONS, stats=stats, halloffame=hof, verbose=True)
+            population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
+                                                         ngen=MAX_GENERATIONS, stats=stats, halloffame=hof, verbose=True)
 
             # print best solution found:
             best = hof.items[0]
