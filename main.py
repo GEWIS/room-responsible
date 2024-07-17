@@ -3,7 +3,6 @@ import copy
 import os.path
 import sys
 from datetime import datetime
-import vobject
 from deap import algorithms
 from deap import base
 from deap import creator
@@ -89,7 +88,7 @@ class Person:
             self.shift_assigned[i.get_indicator()] = 0
         self.assigned = 0
         self.available = 0
-        self.events = []
+        self.calendar = Calendar()
 
     def set_board(self, val):
         self.is_board = val
@@ -138,13 +137,14 @@ class Person:
         for i in range(len(DATES)):
             for j in range(len(SHIFTS)):
                 if self.bin_assign[i * len(SHIFTS) + j] == 1:
-                    DATES[i].get_shifts()[j].assign_person(self)
+                    shift = DATES[i].get_shifts()[j]
+                    shift.assign_person(self)
                     self.add_indicated_shift(SHIFTS[j].get_indicator())
                     self.assigned += 1
         self.available = sum(self.bin_assign)
 
-    def add_event(self, event):
-        self.events.append(event)
+    def get_calendar(self):
+        return self.calendar
 
 class Date:
     def __init__(self, exams, is_monday, date):
@@ -295,7 +295,6 @@ class RoomResponsibleSchedulingProblem:
         for i in range(shifts_per_person):
             non_board_assigned = False
             for j in range(len(self.people)):
-                # print(schedule[j*shifts_per_person+i] == 1 and not bool(PERSONS[j].get_is_board()))
                 if schedule[j * shifts_per_person + i] == 1 and not bool(PERSONS[j].get_is_board()):
                     non_board_assigned = True
             if not non_board_assigned:
@@ -315,10 +314,6 @@ class RoomResponsibleSchedulingProblem:
         for i in PERSONS:
             preferences = i.get_bin_preference()
             for j in range(len(personalized_schedule[i.get_name()])):
-                # print(f'Values for {i.get_name()}')
-                # print(f'value of j is {j}')
-                # print(f'value of schedule is {personalized_schedule[i.get_name()]}')
-                # print(f'value of preferences is {preferences}')
                 if preferences[j] == 0 and personalized_schedule[i.get_name()][j] == 1:
                     violations += 1
 
@@ -333,7 +328,6 @@ class RoomResponsibleSchedulingProblem:
             print(f'{person} : {shifts_dict[person]}')
             person_object = get_person_by_name(person)
             person_object.set_bin_assignment(shifts_dict[person])
-            # person_object.assign_from_bin()
 
         print(f'Board violations: {self.count_board_violations(schedule)} \n')
         print(f'Weekly Shift Violations: {self.count_max_shift_violations(shifts_dict)} \n')
@@ -391,7 +385,7 @@ def print_results():
     for date in DATES:
         for shift in date.get_shifts():
             event = Event()
-            event.add('summary', ' & '.join([person.get_name() for person in PERSONS]))
+            event.add('summary', ' & '.join([person.get_name() for person in shift.get_assigned_persons()]))
             event.add('dtstart', datetime.combine(date.get_date(), shift.get_start_time().time()))
             event.add('dtend', datetime.combine(date.get_date(), shift.get_end_time().time()))
             event.add('dtstamp', datetime.now())
@@ -399,6 +393,7 @@ def print_results():
             event.add('description', 'Room Responsible Shift')
 
             cal.add_component(event)
+
 
 
     with open('OpenhoudenSchedule.ics', 'wb') as file:
@@ -421,7 +416,6 @@ def read_availabilities(csv_name):
 
         # read all lines
         for line in file:
-            # print(line)
             # read first line, which are the shifts
             if index == 0:
                 shifts = list(filter(None, line.rstrip().split(";")))
@@ -443,7 +437,6 @@ def read_availabilities(csv_name):
                 data = line.rstrip().split(";")
                 DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%m/%d/%Y")))
                 availabilities = line.split(';')[3:]
-                print(availabilities)
                 for i in SHIFTS:
                     DATES[index - 4].add_shift(copy.deepcopy(i))
                 for i, v in enumerate(availabilities):
@@ -470,22 +463,12 @@ random.seed(RANDOM_SEED)
 
 toolbox = base.Toolbox()
 
-# rrsp = RoomResponsibleSchedulingProblem()
-
-
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         file_name = sys.argv[1] if ".csv" in sys.argv[1] else sys.argv[1] + ".csv"
         if os.path.isfile(file_name):
             read_availabilities(file_name)
             rrsp = RoomResponsibleSchedulingProblem()
-
-            # random_solution = np.random.randint(2, size=len(scheduling_problem))
-            # print("Random solution is")
-            # print(random_solution)
-            #
-            # scheduling_problem.print_schedule_info(random_solution)
-            # print(f'Total cost = {scheduling_problem.get_cost(random_solution)}')
 
             # define a single objective, maximizing fitness strategy:
             creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
