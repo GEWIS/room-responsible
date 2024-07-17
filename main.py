@@ -4,18 +4,14 @@ import os.path
 import sys
 from datetime import datetime
 import vobject
-from deap import tools
 from deap import algorithms
-import numpy as np
 from deap import base
 from deap import creator
 from deap import tools
+from icalendar import Calendar, Event
 
 import random
 import numpy
-
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 
 def eaSimpleWithElitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
@@ -146,8 +142,6 @@ class Person:
                     self.assigned += 1
         self.available = sum(self.bin_assign)
 
-
-
 class Date:
     def __init__(self, exams, is_monday, date):
         self.exams = exams
@@ -187,7 +181,6 @@ class Date:
         for i in self.shifts:
             string += f'- {str(i)}\n'
         return string
-
 
 class Shift:
     def __init__(self, start, end, indicator):
@@ -390,19 +383,35 @@ def print_results():
             file.write(','.join(shift_row) + '\n')
 
     # Create iCal file with events
-    cal = vobject.iCalendar()
+    # cal = vobject.iCalendar()
+    # for date in DATES:
+    #     for shift in date.get_shifts():
+    #         event = cal.add('vevent')
+    #         event.add('dtstart').value = datetime.combine(date.get_date(), shift.get_start_time().time())
+    #         event.add('dtend').value = datetime.combine(date.get_date(), shift.get_end_time().time())
+    #         event.add('summary').value = f'Shift {shift.get_indicator()}'
+    #         event.add('description').value = f'{", ".join([p.get_name() for p in shift.get_assigned_persons()])} assigned'
+    #         event.prettyPrint()
+
+    cal = Calendar()
+
     for date in DATES:
         for shift in date.get_shifts():
-            event = cal.add('vevent')
-            event.add('dtstart').value = datetime.combine(date.get_date(), shift.get_start_time().time())
-            event.add('dtend').value = datetime.combine(date.get_date(), shift.get_end_time().time())
-            event.add('summary').value = f'Shift {shift.get_indicator()}'
-            event.add('description').value = f'{", ".join([p.get_name() for p in shift.get_assigned_persons()])} assigned'
-            event.prettyPrint()
+            event = Event()
+            event.add('summary', ' & '.join([person.get_name() for person in PERSONS]))
+            event.add('dtstart', datetime.combine(date.get_date(), shift.get_start_time().time()))
+            event.add('dtend', datetime.combine(date.get_date(), shift.get_end_time().time()))
+            event.add('dtstamp', datetime.now())
+            event.add('location', 'MF 3.155')
+            event.add('description', 'Room Responsible Shift')
 
-    with open('OpenhoudenSchedule.ics', 'w') as ics_file:
-        ics_file.write(cal.serialize())
-        print('iCal file OpenhoudenSchedule.ics created successfully')
+            cal.add_component(event)
+
+
+    with open('OpenhoudenSchedule.ics', 'wb') as file:
+        file.write(cal.to_ical())
+
+    print("iCalendar file created succesfully")
 
 DATES = []
 PERSONS = []
