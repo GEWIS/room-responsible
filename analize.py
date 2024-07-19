@@ -17,7 +17,6 @@ RANDOM_SEED = 42
 
 fake = Faker(['en_US', 'nl_NL'])
 
-
 def get_random_person():
     person = Person(fake.first_name())
     person.set_max_shifts(fake.random_int(min=-1, max=5))
@@ -25,10 +24,9 @@ def get_random_person():
     person.set_bin_preference([fake.boolean() for _ in range(len(DATES) * len(SHIFTS))])
     return person
 
-
-def generate_csv():
-    print("Generating CSV file...")
-    with open('test.csv', 'w', newline='') as file:
+def generate_csv(filename):
+    print(f"Generating CSV file: {filename}")
+    with open(filename, 'w', newline='') as file:
         for shift in SHIFTS:
             file.write(
                 f'{datetime.strftime(shift.get_start_time(), "%H:%M:%S")};{datetime.strftime(shift.get_end_time(), "%H:%M:%S")};{shift.get_indicator()};')
@@ -46,7 +44,6 @@ def generate_csv():
                 availabilities += ';' + availability
             file.write(f'{datetime.strftime(v.get_date(), "%m/%d/%Y")};0;{int(v.get_date().weekday()==0)};{availabilities}\n')
 
-
 def get_weekdays_in_current_month():
     now = datetime.now()
     first_day_of_month = now.replace(day=1)
@@ -60,12 +57,12 @@ def get_weekdays_in_current_month():
         current_date += timedelta(days=1)
     return weekdays
 
-
-def run_evolution(dummy_arg):
-    file_name = 'test.csv'
-    if os.path.isfile(file_name):
-        print(f"Reading availabilities from {file_name}...")
-        read_availabilities(file_name)
+def run_evolution(test_num):
+    filename = f'test_{test_num}.csv'
+    generate_csv(filename)
+    if os.path.isfile(filename):
+        print(f"Reading availabilities from {filename}...")
+        read_availabilities(filename)
         rrsp = RoomResponsibleSchedulingProblem()
 
         # Check if DEAP classes already exist and do not redefine them
@@ -95,17 +92,16 @@ def run_evolution(dummy_arg):
 
         hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
 
-        print("Starting evolution...")
+        print(f"Starting evolution for test {test_num}...")
         population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER,
                                                      mutpb=P_MUTATION, ngen=MAX_GENERATIONS,
                                                      stats=stats, halloffame=hof, verbose=True)
 
         for gen, record in enumerate(logbook):
             if record['min'] == 0.0:  # Assuming a fitness of 0 means optimality
-                print(f"Optimal solution found in generation {gen + 1}")
+                print(f"Optimal solution found in generation {gen + 1} for test {test_num}")
                 return gen + 1  # generations are 0-indexed, so add 1
         return MAX_GENERATIONS
-
 
 if __name__ == "__main__":
     print("Setting up shifts and dates...")
@@ -119,8 +115,6 @@ if __name__ == "__main__":
     for shift in SHIFTS:
         for date in DATES:
             date.add_shift(shift)
-
-    generate_csv()
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         print(f"Running {NUM_TESTS} tests in parallel...")
