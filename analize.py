@@ -4,11 +4,11 @@ from datetime import datetime, timedelta
 import numpy as np
 import os
 from main import Person, Shift, Date, RoomResponsibleSchedulingProblem, ea_simple_with_elitism, read_availabilities
-from deap import creator, base, tools
+from deap import creator, base, tools, algorithms
 
 # Constants
-MAX_GENERATIONS = 2000
-NUM_TESTS = 10  # adjust as needed
+MAX_GENERATIONS = 200
+NUM_TESTS = 1  # Adjust as needed
 POPULATION_SIZE = 300
 P_CROSSOVER = 0.9
 P_MUTATION = 0.2
@@ -16,12 +16,13 @@ HALL_OF_FAME_SIZE = 30
 RANDOM_SEED = 42
 
 fake = Faker(['en_US', 'nl_NL'])
+Faker.seed(RANDOM_SEED)
 
 def get_random_person():
     person = Person(fake.first_name())
     person.set_max_shifts(fake.random_int(min=-1, max=5))
     person.set_board(fake.boolean())
-    person.set_bin_preference([fake.boolean() for _ in range(len(DATES) * len(SHIFTS))])
+    person.set_bin_preference([fake.random_int(0, 1) for _ in range(len(DATES) * len(SHIFTS))])
     return person
 
 def generate_csv(filename):
@@ -42,7 +43,7 @@ def generate_csv(filename):
                     if person.get_bin_preference()[k * len(SHIFTS) + j]:
                         availability += f'{shift.get_indicator()}'
                 availabilities += ';' + availability
-            file.write(f'{datetime.strftime(v.get_date(), "%m/%d/%Y")};0;{int(v.get_date().weekday()==0)};{availabilities}\n')
+            file.write(f'{datetime.strftime(v.get_date(), "%m/%d/%Y")};0;{int(v.get_date().weekday()==0)}{availabilities}\n')
 
 def get_weekdays_in_current_month():
     now = datetime.now()
@@ -57,7 +58,23 @@ def get_weekdays_in_current_month():
         current_date += timedelta(days=1)
     return weekdays
 
-def run_evolution(test_num):
+def run_single_generation(toolbox, population, hof_size):
+    # Select the next generation individuals
+    offspring = toolbox.select(population, len(population) - hof_size)
+
+    # Vary the pool of individuals
+    offspring = algorithms.varAnd(offspring, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION)
+
+    # Evaluate the individuals with an invalid fitness
+    invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
+    fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+    for ind, fit in zip(invalid_ind, fitnesses):
+        ind.fitness.values = fit
+
+    # Return the evolved offspring
+    return offspring
+
+def run_evolution(test_num, max_generations):
     filename = f'test_{test_num}.csv'
     generate_csv(filename)
     if os.path.isfile(filename):
@@ -93,15 +110,51 @@ def run_evolution(test_num):
         hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
 
         print(f"Starting evolution for test {test_num}...")
-        population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER,
-                                                     mutpb=P_MUTATION, ngen=MAX_GENERATIONS,
-                                                     stats=stats, halloffame=hof, verbose=True)
 
-        for gen, record in enumerate(logbook):
-            if record['min'] == 0.0:  # Assuming a fitness of 0 means optimality
-                print(f"Optimal solution found in generation {gen + 1} for test {test_num}")
-                return gen + 1  # generations are 0-indexed, so add 1
-        return MAX_GENERATIONS
+        # Initialize logbook and hall of fame
+        logbook = tools.Logbook()
+        logbook.header = ['gen', 'nevals'] + (stats.fields if stats else [])
+
+        # Evaluate the individuals with an invalid fitness
+        invalid_ind = [ind for ind in population if not ind.fitness.valid]
+        fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
+        for ind, fit in zip(invalid_ind, fitnesses):
+            ind.fitness.values = fit
+
+        hof.update(population)
+        hof_size = len(hof.items) if hof.items else 0
+
+        record = stats.compile(population) if stats else {}
+        logbook.record(gen=0, nevals=len(invalid_ind), **record)
+        print(logbook.stream)
+
+        for gen in range(1, max_generations + 1):
+            print(f"Test {test_num} - Generation {gen}")
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(run_single_generation, toolbox, population, hof_size)
+                offspring = future.result()
+
+            # Add the best individuals back to population
+            offspring.extend(hof.items)
+
+            # Update the hall of fame with the generated individuals
+            hof.update(offspring)
+
+            # Replace the current population by the offspring
+            population[:] = offspring
+
+            # Append the current generation statistics to the logbook
+            record = stats.compile(population) if stats else {}
+            logbook.record(gen=gen, nevals=len(invalid_ind), **record)
+            print(logbook.stream)
+
+            for record in logbook:
+                if record['min'] == 0.0:  # Assuming a fitness of 0 means optimality
+                    print(f"Optimal solution found in generation {gen + 1} for test {test_num}")
+                    return gen + 1  # generations are 0-indexed, so add 1
+
+        print(f"Max generations reached for test {test_num}")
+        return max_generations
 
 if __name__ == "__main__":
     print("Setting up shifts and dates...")
@@ -118,9 +171,8 @@ if __name__ == "__main__":
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         print(f"Running {NUM_TESTS} tests in parallel...")
-        results = list(executor.map(run_evolution, range(NUM_TESTS)))
+        results = list(executor.map(run_evolution, range(NUM_TESTS), [MAX_GENERATIONS] * NUM_TESTS))
 
     average_generations = sum(results) / len(results)
-
     print(f"Average generations needed: {average_generations}")
     print(f"Results: {results}")
