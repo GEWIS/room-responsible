@@ -1,7 +1,6 @@
 # Person class
 import copy
 import os.path
-import sys
 from datetime import datetime
 from deap import algorithms
 from deap import base
@@ -14,6 +13,7 @@ import argparse
 
 class Person:
     def __init__(self, name):
+        print(f'Creating person {name}')
         self.name = name
         self.calendar = []
         self.non_busy = 0
@@ -180,7 +180,7 @@ class RoomResponsibleSchedulingProblem:
 
     def get_cost(self, schedule):
         if len(schedule) != self.__len__():
-            raise ValueError(f'Size of schedule list should be equal to: {self.__len__()}')
+            raise ValueError(f'Size of schedule list should be equal to: {self.__len__()}, instead got: {len(schedule)} for schedule {schedule} and {len(PERSONS), len(SHIFTS), len(DATES)}')
 
         shifts_dict = self.get_room_responsible_shifts(schedule)
 
@@ -194,7 +194,6 @@ class RoomResponsibleSchedulingProblem:
         violations = [board_violations, max_shift_violations, people_per_shift_violations, non_board_violations,
                       consecutive_shift_violations, preference_violations]
         weights = [300, 10, 1000, 100, 5, 2000]
-
         return sum(v * w for v, w in zip(violations, weights))
 
     def count_board_violations(self, schedule):
@@ -392,6 +391,8 @@ def print_results():
 
     with open('OpenhoudenSchedule.ics', 'wb') as file:
         file.write(cal.to_ical())
+    if not os.path.exists('schedules'):
+        os.makedirs('schedules')
     for person in PERSONS:
         with open(f'schedules/Openhouden{person.get_name()}.ics', 'wb') as file:
             file.write(person.get_calendar().to_ical())
@@ -408,6 +409,9 @@ def read_availabilities(csv_name):
     global SHIFTS
     global PERSONS
     global DATES
+    PERSONS = []
+    DATES = []
+    SHIFTS = []
     with open(csv_name, 'r') as file:
         index = 0
 
@@ -437,6 +441,7 @@ def read_availabilities(csv_name):
                 for i in SHIFTS:
                     DATES[index - 4].add_shift(copy.deepcopy(i))
                 for i, v in enumerate(availabilities):
+                    print(i,v)
                     for j in DATES[index - 4].get_shifts():
                         if j.get_indicator() in v:
                             j.add_available_person(PERSONS[i])
@@ -450,8 +455,8 @@ def read_availabilities(csv_name):
 # Genetic Algorithm constants:
 POPULATION_SIZE = 300
 P_CROSSOVER = 0.9  # probability for crossover
-P_MUTATION = 0.2  # probability for mutating an individual
-max_generations = 1000
+P_MUTATION = 0.4  # probability for mutating an individual
+max_generations = 2000
 HALL_OF_FAME_SIZE = 30
 parser = argparse.ArgumentParser(description="List of arguments")
 parser.add_argument("-g", "--generations", help = "How many generations should be run")

@@ -7,8 +7,8 @@ from main import Person, Shift, Date, RoomResponsibleSchedulingProblem, ea_simpl
 from deap import creator, base, tools, algorithms
 
 # Constants
-MAX_GENERATIONS = 2000
-NUM_TESTS = 10  # Adjust as needed
+MAX_GENERATIONS = 10
+NUM_TESTS = 2  # Adjust as needed
 POPULATION_SIZE = 300
 P_CROSSOVER = 0.9
 P_MUTATION = 0.2
@@ -18,6 +18,10 @@ RANDOM_SEED = 42
 fake = Faker(['en_US', 'nl_NL'])
 Faker.seed(RANDOM_SEED)
 
+DATES = []
+PERSONS = []
+SHIFTS = []
+
 def get_random_person():
     person = Person(fake.first_name())
     person.set_max_shifts(fake.random_int(min=-1, max=5))
@@ -26,7 +30,15 @@ def get_random_person():
     return person
 
 def generate_csv(filename):
+    global DATES
+    global PERSONS
+    global SHIFTS
     print(f"Generating CSV file: {filename}")
+    DATES = [Date(False, 0, i) for i in get_weekdays_in_current_month()]
+    PERSONS = [get_random_person() for _ in range(15)]
+    for shift in SHIFTS:
+        for date in DATES:
+            date.add_shift(shift)
     with open(filename, 'w', newline='') as file:
         for shift in SHIFTS:
             file.write(
@@ -43,7 +55,7 @@ def generate_csv(filename):
                     if person.get_bin_preference()[k * len(SHIFTS) + j]:
                         availability += f'{shift.get_indicator()}'
                 availabilities += ';' + availability
-            file.write(f'{datetime.strftime(v.get_date(), "%m/%d/%Y")};0;{int(v.get_date().weekday()==0)};{availabilities}\n')
+            file.write(f'{datetime.strftime(v.get_date(), "%m/%d/%Y")};0;{int(v.get_date().weekday()==0)}{availabilities}\n')
 
 def get_weekdays_in_current_month():
     now = datetime.now()
@@ -160,12 +172,7 @@ if __name__ == "__main__":
         Shift("8:30:00", "13:00:00", "M"),
         Shift("13:00:00", "17:00:00", "A"),
     ]
-    DATES = [Date(False, 0, i) for i in get_weekdays_in_current_month()]
-    PERSONS = [get_random_person() for _ in range(15)]
 
-    for shift in SHIFTS:
-        for date in DATES:
-            date.add_shift(shift)
 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         print(f"Running {NUM_TESTS} tests in parallel...")
