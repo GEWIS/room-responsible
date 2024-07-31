@@ -340,20 +340,20 @@ def get_person_by_name(name):
 def print_results():
     global NO_ONE
 
-    # Write resulting shifts to file
-    file = open('OpenhoudenResults.csv', 'w')
-    file.write(f'Subject, Start Date, Start Time, End Date, End Time \n')
-    for date in DATES:
-        for shift in date.get_shifts():
-            room_responsible_shift = ""
-            while len(shift.get_assigned_persons()) < 2:
-                shift.assign_person(copy.deepcopy(NO_ONE))
-            room_responsible_shift += f'{shift.get_assigned_persons()[0].get_name()} & {shift.get_assigned_persons()[1].get_name()},'
-            room_responsible_shift += f'{datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_start_time(), "%H:%M:%S")}, {datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_end_time(), "%H:%M:%S")} \n'
-            file.write(room_responsible_shift)
-    file.close()
+    # Write resulting shifts to file with UTF-8 encoding
+    with open('OpenhoudenResults.csv', 'w', encoding='utf-8-sig') as file:
+        file.write(f'Subject, Start Date, Start Time, End Date, End Time \n')
+        for date in DATES:
+            for shift in date.get_shifts():
+                room_responsible_shift = ""
+                while len(shift.get_assigned_persons()) < 2:
+                    shift.assign_person(copy.deepcopy(NO_ONE))
+                print(shift.get_assigned_persons()[0].get_name(), shift.get_assigned_persons()[1].get_name())
+                room_responsible_shift += f'{shift.get_assigned_persons()[0].get_name()} & {shift.get_assigned_persons()[1].get_name()},'
+                room_responsible_shift += f'{datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_start_time(), "%H:%M:%S")}, {datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_end_time(), "%H:%M:%S")} \n'
+                file.write(room_responsible_shift)
 
-    with open("OpenhouderStats.csv", "w") as file:
+    with open("OpenhouderStats.csv", "w", encoding='utf-8-sig') as file:  # Use UTF-8 encoding
         file.write("STATS\n")
 
         # Create headers for each person
@@ -449,6 +449,8 @@ def read_availabilities(csv_name):
                         else:
                             PERSONS[i].bin_preference.append(0)
             index += 1
+    for person in PERSONS:
+        print(person.get_name())
 
 
 
