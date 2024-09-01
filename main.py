@@ -13,7 +13,6 @@ import argparse
 
 class Person:
     def __init__(self, name):
-        print(f'Creating person {name}')
         self.name = name
         self.calendar = []
         self.non_busy = 0
@@ -193,7 +192,7 @@ class RoomResponsibleSchedulingProblem:
 
         violations = [board_violations, max_shift_violations, people_per_shift_violations, non_board_violations,
                       consecutive_shift_violations, preference_violations]
-        weights = [300, 10, 1000, 100, 5, 2000]
+        weights = [30, 25, 100, 10, 1, 200]
         return sum(v * w for v, w in zip(violations, weights))
 
     def count_board_violations(self, schedule):
@@ -348,7 +347,6 @@ def print_results():
                 room_responsible_shift = ""
                 while len(shift.get_assigned_persons()) < 2:
                     shift.assign_person(copy.deepcopy(NO_ONE))
-                print(shift.get_assigned_persons()[0].get_name(), shift.get_assigned_persons()[1].get_name())
                 room_responsible_shift += f'{shift.get_assigned_persons()[0].get_name()} & {shift.get_assigned_persons()[1].get_name()},'
                 room_responsible_shift += f'{datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_start_time(), "%H:%M:%S")}, {datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_end_time(), "%H:%M:%S")} \n'
                 file.write(room_responsible_shift)
@@ -441,7 +439,6 @@ def read_availabilities(csv_name):
                 for i in SHIFTS:
                     DATES[index - 4].add_shift(copy.deepcopy(i))
                 for i, v in enumerate(availabilities):
-                    print(i,v)
                     for j in DATES[index - 4].get_shifts():
                         if j.get_indicator() in v:
                             j.add_available_person(PERSONS[i])
@@ -449,8 +446,6 @@ def read_availabilities(csv_name):
                         else:
                             PERSONS[i].bin_preference.append(0)
             index += 1
-    for person in PERSONS:
-        print(person.get_name())
 
 
 
