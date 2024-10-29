@@ -10,6 +10,10 @@ from icalendar import Calendar, Event
 import random
 import numpy
 import argparse
+import signal
+import sys
+import time
+from concurrent.futures import ProcessPoolExecutor
 
 class Person:
     def __init__(self, name):
@@ -192,7 +196,7 @@ class RoomResponsibleSchedulingProblem:
 
         violations = [board_violations, max_shift_violations, people_per_shift_violations, non_board_violations,
                       consecutive_shift_violations, preference_violations]
-        weights = [30, 25, 100, 10, 1, 200]
+        weights = [1, 6, 10, 1, 0, 20]
         return sum(v * w for v, w in zip(violations, weights))
 
     def count_board_violations(self, schedule):
@@ -208,13 +212,16 @@ class RoomResponsibleSchedulingProblem:
         return violations
 
     def count_max_shift_violations(self, personalized_schedule):
+
         violations = 0
         for i in self.people:
+
             shift_count = sum(personalized_schedule[i.get_name()])
             max_shifts = i.get_max_shifts()
             if max_shifts == -1:
                 continue
-            violations += max([0, (shift_count - max_shifts // 4)])
+            if (shift_count - ((max_shifts * 52) // 12)) > 0:
+                violations += (shift_count - ((max_shifts * 52) // 12))
         return violations
 
     def count_people_per_shift_violations(self, personalized_schedule):
@@ -425,15 +432,17 @@ def read_availabilities(csv_name):
                 for i in range(2, len(persons)):
                     PERSONS.append(Person(persons[i]))
             elif index == 2:
-                max_shifts = list(filter(None, line.rstrip().split(";")))
-                for i in range(1, len(max_shifts)):
-                    PERSONS[i - 1].set_max_shifts(int(max_shifts[i]))
+                max_shifts = list(line.rstrip().split(";"))[3:]
+                for i in range(0, len(max_shifts)):
+                    if max_shifts[i]:
+                        PERSONS[i].set_max_shifts(int(max_shifts[i]))
             elif index == 3:
                 board = list(filter(None, line.rstrip().split(";")))
                 for i in range(1, len(board)):
                     PERSONS[i - 1].set_board(int(board[i]))
             else:
                 data = line.rstrip().split(";")
+                # print(data)
                 DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%m/%d/%Y")))
                 availabilities = line.split(';')[3:]
                 for i in SHIFTS:
@@ -464,8 +473,27 @@ random.seed(RANDOM_SEED)
 
 toolbox = base.Toolbox()
 
-if __name__ == "__main__":
 
+
+# Add a signal handler to catch interruption signals
+def signal_handler(signal, frame):
+    print("\n\nSimulation interrupted! Printing the best individual found so far.")
+    if hof.items:
+        best = hof.items[0]
+        print("-- Best Individual =", best)
+        print("-- Best Fitness =", best.fitness.values[0])
+        print("\n-- Schedule = ")
+        rrsp.print_schedule_info(best)
+        for i in PERSONS:
+            i.assign_from_bin()
+        print_results()
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, signal_handler)
+
+if __name__ == "__main__":
+    start_time = time.time()
     args = parser.parse_args()
     if args.generations:
         max_generations = int(args.generations)
@@ -515,19 +543,42 @@ if __name__ == "__main__":
         # define the hall-of-fame object:
         hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
 
-        # perform the Genetic Algorithm flow with hof feature added:
-        population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
-                                                     ngen=max_generations, stats=stats, halloffame=hof, verbose=True)
+        try:
+            # perform the Genetic Algorithm flow with hof feature added:
+            population, logbook = ea_simple_with_elitism(
+                population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
+                ngen=max_generations, stats=stats, halloffame=hof, verbose=True
+            )
 
-        # print best solution found:
-        best = hof.items[0]
-        print("-- Best Individual = ", best)
-        print("-- Best Fitness = ", best.fitness.values[0])
-        print()
-        print("-- Schedule = ")
-        rrsp.print_schedule_info(best)
+            # print best solution found:
+            best = hof.items[0]
+            print("-- Best Individual =", best)
+            print("-- Best Fitness =", best.fitness.values[0])
+            print("\n-- Schedule = ")
+            rrsp.print_schedule_info(best)
 
-        for i in PERSONS:
-            i.assign_from_bin()
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            print(f"\nSimulation completed in {elapsed_time:.2f} seconds")
 
-        print_results()
+            for i in PERSONS:
+                i.assign_from_bin()
+
+            print_results()
+            for i in PERSONS:
+                print(i.get_name(), i.get_max_shifts(), ((i.get_max_shifts() * 52) // 12))
+
+        except KeyboardInterrupt:
+            print("\nSimulation interrupted! Returning the best individual found so far.")
+            if hof.items:
+                best = hof.items[0]
+                print("-- Best Individual =", best)
+                print("-- Best Fitness =", best.fitness.values[0])
+                print("\n-- Schedule = ")
+                rrsp.print_schedule_info(best)
+                for i in PERSONS:
+                    i.assign_from_bin()
+                print_results()
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                print(f"\nSimulation completed in {elapsed_time:.2f} seconds")
