@@ -10,6 +10,16 @@ from icalendar import Calendar, Event
 import random
 import numpy
 import argparse
+from textual.app import App, ComposeResult
+from textual.containers import Vertical, Center, Middle
+from textual.reactive import reactive
+from textual.widgets import Header, Footer, DirectoryTree, Label, Input, ProgressBar
+from textual.widget import Widget
+from textual.screen import Screen
+import time
+import asyncio
+from textual.worker import get_current_worker
+
 
 class Person:
     def __init__(self, name):
@@ -27,6 +37,9 @@ class Person:
         self.assigned = 0
         self.available = 0
         self.calendar = Calendar()
+
+        def __str__(self):
+            return self.name
 
     def set_board(self, val):
         self.is_board = val
@@ -209,12 +222,16 @@ class RoomResponsibleSchedulingProblem:
 
     def count_max_shift_violations(self, personalized_schedule):
         violations = 0
+
         for i in self.people:
+            # print(i.get_name(), i.get_max_shifts())
             shift_count = sum(personalized_schedule[i.get_name()])
             max_shifts = i.get_max_shifts()
+            allowed_monthly = int(max_shifts * 52 / 12)
             if max_shifts == -1:
                 continue
-            violations += max([0, (shift_count - max_shifts // 4)])
+            violations += max([0, shift_count - allowed_monthly])
+            # print(i.get_name(), allowed_monthly, shift_count, max([0, shift_count - allowed_monthly]))
         return violations
 
     def count_people_per_shift_violations(self, personalized_schedule):
@@ -426,6 +443,7 @@ def read_availabilities(csv_name):
                     PERSONS.append(Person(persons[i]))
             elif index == 2:
                 max_shifts = list(filter(None, line.rstrip().split(";")))
+                print(max_shifts)
                 for i in range(1, len(max_shifts)):
                     PERSONS[i - 1].set_max_shifts(int(max_shifts[i]))
             elif index == 3:
@@ -434,7 +452,7 @@ def read_availabilities(csv_name):
                     PERSONS[i - 1].set_board(int(board[i]))
             else:
                 data = line.rstrip().split(";")
-                DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%m/%d/%Y")))
+                DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%d/%m/%Y")))
                 availabilities = line.split(';')[3:]
                 for i in SHIFTS:
                     DATES[index - 4].add_shift(copy.deepcopy(i))
@@ -464,17 +482,58 @@ random.seed(RANDOM_SEED)
 
 toolbox = base.Toolbox()
 
-if __name__ == "__main__":
 
-    args = parser.parse_args()
-    if args.generations:
-        max_generations = int(args.generations)
-    if args.input:
-        file_name = args.input
+class FileSelectScreen(Screen):
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield Vertical(
+            DirectoryTree("./", id="tree"),
+            Label("Please select availability sheet...", id="info"),
+            Input(placeholder="Nr. Generations", type="integer")
+        )
+        yield Footer()
 
-    if os.path.isfile(file_name):
-        read_availabilities(file_name)
-        rrsp = RoomResponsibleSchedulingProblem()
+
+class GeneratingScheduleScreen(Screen):
+    def compose(self) -> ComposeResult:
+        yield Header()
+        yield ScheduleProgressWidget()
+        yield Footer()
+
+
+class ScheduleProgressWidget(Widget):
+    def compose(self) -> ComposeResult:
+        with Center():
+            with Middle():
+                yield ProgressBar(id="progress")
+
+
+class RoomResponsibleApp(App):
+
+    def on_mount(self) -> None:
+        self.install_screen(FileSelectScreen(), name="fileSelect")
+        self.push_screen("fileSelect")
+        self.install_screen(GeneratingScheduleScreen(), name="generatingSchedule")
+
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        """Handle file selection event."""
+        selected_path = event.path
+        self.query_one("#info", Label).update(f"Selected: {selected_path}")
+
+        # Start file processing asynchronously
+        self.run_worker(self.process_file(selected_path))
+
+    async def process_file(self, file_path: str) -> None:
+        """Process the file and update the progress bar without blocking UI."""
+        await self.switch_screen("generatingSchedule")
+        progress_bar = self.query_one("#progress", ProgressBar)
+
+        for i in range(101):  # Simulate progress from 0 to 100%
+            progress_bar.update(total = 101, progress = i)
+            await asyncio.sleep(0.05)  # Allow UI updates
+
+        # Processing complete
+        self.notify("File processing completed!", title="Success")
 
         # define a single objective, maximizing fitness strategy:
         creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
@@ -491,11 +550,9 @@ if __name__ == "__main__":
         # create the population operator to generate a list of individuals:
         toolbox.register("populationCreator", tools.initRepeat, list, toolbox.individualCreator)
 
-
         # fitness calculation
         def get_cost(individual):
             return rrsp.get_cost(individual),  # return a tuple
-
 
         toolbox.register("evaluate", get_cost)
 
@@ -531,3 +588,9 @@ if __name__ == "__main__":
             i.assign_from_bin()
 
         print_results()
+
+
+if __name__ == "__main__":
+
+    app = RoomResponsibleApp()
+    app.run()
