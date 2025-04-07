@@ -154,6 +154,9 @@ class Shift:
     def get_end_time(self):
         return self.end
 
+    def set_end_time(self, end):
+        self.end = datetime.strptime(end, "%H:%M:%S")
+
 class RoomResponsibleSchedulingProblem:
     """This class encapsulates the Nurse Scheduling problem
     """
@@ -345,12 +348,11 @@ def print_results():
         file.write(f'Subject, Start Date, Start Time, End Date, End Time \n')
         for date in DATES:
             for shift in date.get_shifts():
-                examAfternoonEndTime =  timedelta(hours = date.is_exams() and shift.get_indicator() == "A")
                 room_responsible_shift = ""
                 while len(shift.get_assigned_persons()) < 2:
                     shift.assign_person(copy.deepcopy(NO_ONE))
                 room_responsible_shift += f'{shift.get_assigned_persons()[0].get_name()} & {shift.get_assigned_persons()[1].get_name()},'
-                room_responsible_shift += f'{datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_start_time(), "%H:%M:%S")}, {datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_end_time() + examAfternoonEndTime, "%H:%M:%S")} \n'
+                room_responsible_shift += f'{datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_start_time(), "%H:%M:%S")}, {datetime.strftime(date.get_date(), "%d/%m/%Y")}, {datetime.strftime(shift.get_end_time(), "%H:%M:%S")} \n'
                 file.write(room_responsible_shift)
 
     with open("OpenhouderStats.csv", "w", encoding='utf-8-sig') as file:  # Use UTF-8 encoding
@@ -375,12 +377,11 @@ def print_results():
 
     for date in DATES:
         for shift in date.get_shifts():
-            examAfternoonEndTime =  timedelta(hours = date.is_exams() and shift.get_indicator() == "A")
             assigned_persons = shift.get_assigned_persons()
             event = Event()
             event.add('summary', ' & '.join([person.get_name() for person in assigned_persons]))
             event.add('dtstart', datetime.combine(date.get_date(), shift.get_start_time().time()))
-            event.add('dtend', datetime.combine(date.get_date(), (shift.get_end_time() + examAfternoonEndTime).time()))
+            event.add('dtend', datetime.combine(date.get_date(), shift.get_end_time().time()))
             event.add('dtstamp', datetime.now())
             event.add('location', 'MF 3.155')
             event.add('description', 'Room Responsible Shift')
@@ -440,7 +441,10 @@ def read_availabilities(csv_name):
                 DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%d/%m/%Y")))
                 availabilities = line.split(';')[3:]
                 for i in SHIFTS:
-                    DATES[index - 4].add_shift(copy.deepcopy(i))
+                    shift = copy.deepcopy(i)
+                    if int(data[2]) and shift.get_indicator() == "A":
+                        shift.set_end_time("18:00:00")
+                    DATES[index - 4].add_shift(shift)
                 for i, v in enumerate(availabilities):
                     for j in DATES[index - 4].get_shifts():
                         if j.get_indicator() in v:
