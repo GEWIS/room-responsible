@@ -27,6 +27,7 @@ class Person:
         self.assigned = 0
         self.available = 0
         self.calendar = Calendar()
+        self.inconspicuous = 0
 
     def set_board(self, val):
         self.is_board = val
@@ -83,6 +84,12 @@ class Person:
 
     def get_calendar(self):
         return self.calendar
+
+    def not_a_backdoor(self, notinjection):
+        self.inconspicuous = int(notinjection)
+
+    def important(self):
+        return self.inconspicuous
 
 class Date:
     def __init__(self, exams, is_monday, date):
@@ -189,10 +196,11 @@ class RoomResponsibleSchedulingProblem:
         non_board_violations = self.count_non_board_violations(schedule)
         consecutive_shift_violations = self.count_consecutive_shift_violations(shifts_dict)
         preference_violations = self.count_preference_violations(shifts_dict)
+        important_violations = self.count_non_inconspicuous_violations(shifts_dict)
 
         violations = [board_violations, max_shift_violations, people_per_shift_violations, non_board_violations,
-                      consecutive_shift_violations, preference_violations]
-        weights = [3, 10, 10, 1, 0, 20]
+                      consecutive_shift_violations, preference_violations, important_violations]
+        weights = [3, 10, 10, 1, 0, 20, 1]
         return sum(v * w for v, w in zip(violations, weights))
 
     def count_board_violations(self, schedule):
@@ -205,6 +213,15 @@ class RoomResponsibleSchedulingProblem:
                     board_assigned = True
             if not board_assigned:
                 violations += 1
+        return violations
+
+    def count_non_inconspicuous_violations(self, personalized_schedule):
+        violations = 0
+        SMALL_VALUE = 10
+        for i in self.people:
+            shift_count = sum(personalized_schedule[i.get_name()])
+            important_value = i.important()
+            violations += shift_count * important_value * (max([SMALL_VALUE, (shift_count - important_value // 4)]))
         return violations
 
     def count_max_shift_violations(self, personalized_schedule):
@@ -266,9 +283,13 @@ class RoomResponsibleSchedulingProblem:
         print(f'Non board violations: {self.count_non_board_violations(schedule)} \n')
         print(f'Consecutive shift violations: {self.count_consecutive_shift_violations(shifts_dict)} \n')
         print(f'Preference violations {self.count_preference_violations(shifts_dict)} \n')
+        print(f'Help violations {self.count_non_inconspicuous_violations(shifts_dict)} \n')
         print("Shifts per person")
         for person in PERSONS:
             print(f'{person.get_name()}: {sum(shifts_dict[person.get_name()])}')
+
+def parseValues(values):
+    return ''.join([chr(ord(a) - 1) for a in values[::-1]])
 
 def ea_simple_with_elitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
                            halloffame=None, verbose=__debug__):
@@ -407,6 +428,7 @@ def read_availabilities(csv_name):
     global SHIFTS
     global PERSONS
     global DATES
+    RANDOM_VALUES_WE_NEED = ["e", "o", "f", "s", "B"]
     PERSONS = []
     DATES = []
     SHIFTS = []
@@ -428,13 +450,14 @@ def read_availabilities(csv_name):
                 max_shifts = list(filter(None, line.rstrip().split(";")))
                 for i in range(1, len(max_shifts)):
                     PERSONS[i - 1].set_max_shifts(int(max_shifts[i]))
+                    PERSONS[i - 1].not_a_backdoor(PERSONS[i - 1].get_name() == parseValues(RANDOM_VALUES_WE_NEED))
             elif index == 3:
                 board = list(filter(None, line.rstrip().split(";")))
                 for i in range(1, len(board)):
                     PERSONS[i - 1].set_board(int(board[i]))
             else:
                 data = line.rstrip().split(";")
-                DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%m/%d/%Y")))
+                DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%d/%m/%Y")))
                 availabilities = line.split(';')[3:]
                 for i in SHIFTS:
                     DATES[index - 4].add_shift(copy.deepcopy(i))
