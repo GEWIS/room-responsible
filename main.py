@@ -270,7 +270,7 @@ class RoomResponsibleSchedulingProblem:
         for person in PERSONS:
             print(f'{person.get_name()}: {sum(shifts_dict[person.get_name()])}')
 
-def ea_simple_with_elitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
+def ea_simple_with_elitism(community, toolbox, cxpb, mutpb, ngen, stats=None,
                            halloffame=None, verbose=__debug__):
     """This algorithm is similar to DEAP eaSimple() algorithm, with the modification that
     halloffame is used to implement an elitism mechanism. The individuals contained in the
@@ -281,7 +281,7 @@ def ea_simple_with_elitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
     logbook.header = ['gen', 'nevals'] + (stats.fields if stats else [])
 
     # Evaluate the individuals with an invalid fitness
-    invalid_ind = [ind for ind in population if not ind.fitness.valid]
+    invalid_ind = [ind for ind in community if not ind.fitness.valid]
     fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
     for ind, fit in zip(invalid_ind, fitnesses):
         ind.fitness.values = fit
@@ -289,10 +289,10 @@ def ea_simple_with_elitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
     if halloffame is None:
         raise ValueError("halloffame parameter must not be empty!")
 
-    halloffame.update(population)
+    halloffame.update(community)
     hof_size = len(halloffame.items) if halloffame.items else 0
 
-    record = stats.compile(population) if stats else {}
+    record = stats.compile(community) if stats else {}
     logbook.record(gen=0, nevals=len(invalid_ind), **record)
     if verbose:
         print(logbook.stream)
@@ -301,7 +301,7 @@ def ea_simple_with_elitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
     for gen in range(1, ngen + 1):
 
         # Select the next generation individuals
-        offspring = toolbox.select(population, len(population) - hof_size)
+        offspring = toolbox.select(community, len(community) - hof_size)
 
         # Vary the pool of individuals
         offspring = algorithms.varAnd(offspring, toolbox, cxpb, mutpb)
@@ -312,22 +312,22 @@ def ea_simple_with_elitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
         for ind, fit in zip(invalid_ind, fitnesses):
             ind.fitness.values = fit
 
-        # add the best back to population:
+        # add the best back to community:
         offspring.extend(halloffame.items)
 
         # Update the hall of fame with the generated individuals
         halloffame.update(offspring)
 
-        # Replace the current population by the offspring
-        population[:] = offspring
+        # Replace the current community by the offspring
+        community[:] = offspring
 
         # Append the current generation statistics to the logbook
-        record = stats.compile(population) if stats else {}
+        record = stats.compile(community) if stats else {}
         logbook.record(gen=gen, nevals=len(invalid_ind), **record)
         if verbose:
             print(logbook.stream)
 
-    return population, logbook
+    return community, logbook
 
 def get_person_by_name(name):
     global PERSONS
@@ -450,16 +450,16 @@ def read_availabilities(csv_name):
 
 
 # Genetic Algorithm constants:
-POPULATION_SIZE = 300
-P_CROSSOVER = 0.9  # probability for crossover
 P_MUTATION = 0.4  # probability for mutating an individual
+COMMUNITY_SIZE = 300
+P_CROSSOVER = 0.9  # Probability for crossover
 max_generations = 2000
 HALL_OF_FAME_SIZE = 30
 parser = argparse.ArgumentParser(description="List of arguments")
 parser.add_argument("-g", "--generations", help = "How many generations should be run")
 parser.add_argument("-i", "--input", help="Input file path")
 # set the random seed:
-RANDOM_SEED = 42
+RANDOM_SEED = 44
 random.seed(RANDOM_SEED)
 
 toolbox = base.Toolbox()
@@ -488,8 +488,8 @@ if __name__ == "__main__":
         # create the individual operator to fill up an Individual instance:
         toolbox.register("individualCreator", tools.initRepeat, creator.Individual, toolbox.zeroOrOne, len(rrsp))
 
-        # create the population operator to generate a list of individuals:
-        toolbox.register("populationCreator", tools.initRepeat, list, toolbox.individualCreator)
+        # create the community operator to generate a list of individuals:
+        toolbox.register("communityCreator", tools.initRepeat, list, toolbox.individualCreator)
 
 
         # fitness calculation
@@ -504,8 +504,8 @@ if __name__ == "__main__":
         toolbox.register("mate", tools.cxTwoPoint)
         toolbox.register("mutate", tools.mutFlipBit, indpb=1.0 / len(rrsp))
 
-        # create initial population (generation 0):
-        population = toolbox.populationCreator(n=POPULATION_SIZE)
+        # create initial community (generation 0):
+        community = toolbox.populationCreator(n=COMMUNITY_SIZE)
 
         # prepare the statistics object:
         stats = tools.Statistics(lambda ind: ind.fitness.values)
@@ -516,7 +516,7 @@ if __name__ == "__main__":
         hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
 
         # perform the Genetic Algorithm flow with hof feature added:
-        population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
+        community, logbook = ea_simple_with_elitism(community, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
                                                      ngen=max_generations, stats=stats, halloffame=hof, verbose=True)
 
         # print best solution found:
