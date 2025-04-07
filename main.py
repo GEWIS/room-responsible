@@ -2,6 +2,7 @@
 import copy
 import os.path
 from datetime import datetime
+from datetime import timedelta
 from deap import algorithms
 from deap import base
 from deap import creator
@@ -152,6 +153,9 @@ class Shift:
 
     def get_end_time(self):
         return self.end
+
+    def set_end_time(self, end):
+        self.end = datetime.strptime(end, "%H:%M:%S")
 
 class RoomResponsibleSchedulingProblem:
     """This class encapsulates the Nurse Scheduling problem
@@ -434,10 +438,13 @@ def read_availabilities(csv_name):
                     PERSONS[i - 1].set_board(int(board[i]))
             else:
                 data = line.rstrip().split(";")
-                DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%m/%d/%Y")))
+                DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%d/%m/%Y")))
                 availabilities = line.split(';')[3:]
                 for i in SHIFTS:
-                    DATES[index - 4].add_shift(copy.deepcopy(i))
+                    shift = copy.deepcopy(i)
+                    if int(data[2]) and shift.get_indicator() == "A":
+                        shift.set_end_time("18:00:00")
+                    DATES[index - 4].add_shift(shift)
                 for i, v in enumerate(availabilities):
                     for j in DATES[index - 4].get_shifts():
                         if j.get_indicator() in v:
