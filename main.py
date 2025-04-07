@@ -403,6 +403,9 @@ SHIFTS = []
 NO_ONE = Person("Get Room Responsible")
 file_name = "availability.csv"
 
+def line_to_list(line: str): 
+    return list(filter(None, line.rstrip().split(";")))
+
 def read_availabilities(csv_name):
     global SHIFTS
     global PERSONS
@@ -410,44 +413,46 @@ def read_availabilities(csv_name):
     PERSONS = []
     DATES = []
     SHIFTS = []
-    with open(csv_name, 'r') as file:
-        index = 0
 
-        # read all lines
-        for line in file:
-            # read first line, which are the shifts
+    SHIFTCSV = 3
+    DATEDATA = 2
+    DATEDATASTART = 4
+
+    with open(csv_name, 'r') as file:
+        # Read all lines
+        for index, line in enumerate(file):
+            # Read first line, which are the shifts
             if index == 0:
-                shifts = list(filter(None, line.rstrip().split(";")))
-                for i in range(int(len(shifts) / 3)):
-                    SHIFTS.append(Shift(shifts[i * 3], shifts[i * 3 + 1], shifts[i * 3 + 2]))
+                shifts = line_to_list(line)
+                for i in range(int(len(shifts) / SHIFTCSV)):
+                    SHIFTS.append(Shift(*[shifts[i * SHIFTCSV + i] for i in range(SHIFTCSV)]))
             elif index == 1:
-                persons = list(filter(None, line.rstrip().split(";")))
+                persons = line_to_list(line)
                 for i in range(2, len(persons)):
                     PERSONS.append(Person(persons[i]))
             elif index == 2:
-                max_shifts = list(filter(None, line.rstrip().split(";")))
+                max_shifts = line_to_list(line)
                 for i in range(1, len(max_shifts)):
                     PERSONS[i - 1].set_max_shifts(int(max_shifts[i]))
             elif index == 3:
-                board = list(filter(None, line.rstrip().split(";")))
+                board = line_to_list(line)
                 for i in range(1, len(board)):
                     PERSONS[i - 1].set_board(int(board[i]))
             else:
                 data = line.rstrip().split(";")
-                DATES.append(Date(int(data[2]), int(data[1]), datetime.strptime(data[0], "%m/%d/%Y")))
-                availabilities = line.split(';')[3:]
+                dt = datetime.strptime(data[0], "%d/%m/%Y")
+                DATES.append(Date(exams = int(data[1]), is_monday = dt.weekday() == 0, date = dt))
+
+                availabilities = line.split(';')[DATEDATA:]
                 for i in SHIFTS:
-                    DATES[index - 4].add_shift(copy.deepcopy(i))
+                    DATES[index - DATEDATASTART].add_shift(copy.deepcopy(i))
                 for i, v in enumerate(availabilities):
-                    for j in DATES[index - 4].get_shifts():
+                    for j in DATES[index - DATEDATASTART].get_shifts():
                         if j.get_indicator() in v:
                             j.add_available_person(PERSONS[i])
                             PERSONS[i].bin_preference.append(1)
                         else:
                             PERSONS[i].bin_preference.append(0)
-            index += 1
-
-
 
 # Genetic Algorithm constants:
 POPULATION_SIZE = 300
