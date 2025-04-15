@@ -414,8 +414,11 @@ def read_availabilities(csv_name):
     DATES = []
     SHIFTS = []
 
+    # The amount of cells one Shift takes in the csv file
     SHIFTCSV = 3
+    # How many datacolumns each date has (date + is_exam currently) 
     DATEDATA = 2
+    # How man rows of information before the dates start 
     DATEDATASTART = 4
 
     with open(csv_name, 'r') as file:
