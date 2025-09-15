@@ -1,11 +1,13 @@
-# Person class
+# Person claso
+import re
+
 import copy
 import os.path
 from datetime import datetime
-from deap import algorithms
-from deap import base
-from deap import creator
-from deap import tools
+# from deap import algorithms
+# from deap import base
+# from deap import creator
+# from deap import tools
 from icalendar import Calendar, Event
 import random
 import numpy
@@ -70,6 +72,9 @@ class Person:
 
     def get_indicated_shift(self, indicator):
         return self.shift_assigned[indicator]
+
+    def increment_assigned(self):
+        self.assigned += 1
 
     def assign_from_bin(self):
         for i in range(len(DATES)):
@@ -270,6 +275,126 @@ class RoomResponsibleSchedulingProblem:
         for person in PERSONS:
             print(f'{person.get_name()}: {sum(shifts_dict[person.get_name()])}')
 
+
+import gurobipy as gp
+from gurobipy import GRB
+def solve():
+
+    SHIFTSTOT = len(SHIFTS) * len(DATES)
+
+    N = []
+    B = []
+
+    m = gp.Model("mip1")
+
+    for j, person in enumerate(PERSONS):
+        if person.get_is_board():
+            B.append(j)
+        else:
+            N.append(j)
+
+    # Variables
+    r = m.addMVar(shape=SHIFTSTOT, vtype=GRB.INTEGER, name="r")
+    b = m.addMVar(shape=SHIFTSTOT, vtype=GRB.INTEGER, name="b")
+    x = m.addMVar(shape=(SHIFTSTOT, len(PERSONS)), vtype=GRB.BINARY, name="x")
+    n = m.addMVar(shape=len(N), vtype=GRB.INTEGER, name="n")
+    bv = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="bv")
+    var = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="var")
+
+    # Availability constraint
+    for i in range(SHIFTSTOT):
+        for j, person in enumerate(PERSONS):
+            m.addConstr(x[i][j] <= person.get_bin_preference()[i], f"available_{i}_{j}")
+
+    for i in range(SHIFTSTOT):
+        # Extra variable for people assigned to shift
+        m.addConstr(grsum(x[i]) == r[i], f"rge_{i}")
+        m.addConstr(r[i] <= 2, f"ass_1_{i}")
+
+        # All shifts have at least one board member
+        sum = gp.LinExpr()
+        for j in B:
+            sum += x[i][j]
+        m.addConstr(sum >= b[i], f"boardav_{i}")
+        m.addConstr(sum >= b[i], f"boardav_{i}")
+    
+    # Non board members get maximum their max shifts. 
+    obj = SHIFTSTOT
+    for i, j in enumerate(N):
+        person = PERSONS[j]
+        m.addConstr(grsum(get_column(x, j)) == n[i], f"n_{j}")
+        m.addConstr(n[i] <= person.get_max_shifts(), f"maxshift_{j}")
+        obj -= person.get_max_shifts()
+
+    for i, j in enumerate(B):
+        m.addConstr(grsum(get_column(x, j)) == bv[i], f"bv_{j}")
+        # m.addConstr((bv[i] * len(B) + var[i]) == 2 * obj, f"boardvar_{j}")
+
+    m.ModelSense = GRB.MAXIMIZE
+
+    # m.setObjective(grsum(r) + grsum(b) - grsum(var), GRB.MAXIMIZE)
+    # Set maximization objectives
+    m.setObjectiveN(grsum(r), 0, 0)
+    m.setObjectiveN(grsum(b), 1, 1)
+    m.setObjectiveN(grsum(n), 2, 2)
+    # m.setObjectiveN(-grsum(var), 2, 2)
+
+    m.optimize()
+
+    # print(m.display())
+    
+    for v in m.getVars():
+        print('%s %g' % (v.VarName, v.X))
+
+    bin_prefs = [[0 for _ in range(SHIFTSTOT)] for _ in range(len(PERSONS))]
+    for v in m.getVars():
+        index = re.split(r'[\[\],]+', v.VarName)
+        if (index[0] == "x"):
+            shift, person = int(index[1]), int(index[2])
+            bin_prefs[person][shift] = int(v.X)
+
+    for i in range(len(PERSONS)):
+        PERSONS[i].set_bin_assignment(bin_prefs[i])
+
+def grsum(x):
+    obj = gp.LinExpr()
+    for expr in x:
+        obj += expr
+    return obj
+
+
+def get_column(x, i):
+    return [row[i] for row in x]
+
+
+    # TO_SOLVE = []
+    # # First check if some dates have to be filled in some way.
+    # for shift in SHIFTS:
+    #     av = len(shift.available_people)
+    #     match av:
+    #         case 0:
+    #             shift.assign_person(copy.deepcopy(NO_ONE))
+    #         case 1:
+    #             shift.assign_person(shift.available_people[0])
+    #             shift.assign_person(copy.deepcopy(NO_ONE))
+    #
+    #             shift.available_people[0].increment_assigned()
+    #         case 2:
+    #             shift.assign_person(shift.available_people[0])
+    #             shift.assign_person(shift.available_people[1])
+    #
+    #             shift.available_people[0].increment_assigned()
+    #             shift.available_people[1].increment_assigned()
+    #         case _:
+    #             TO_SOLVE.append(shift)
+
+    
+
+    # Now that that has been done, we should fill up per week (maximum shifts)
+    # Then we fill any slots with RRC members that want to fill in. 
+        # Sidenote, you have to check that it works out in the end. 
+
+
 def ea_simple_with_elitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
                            halloffame=None, verbose=__debug__):
     """This algorithm is similar to DEAP eaSimple() algorithm, with the modification that
@@ -428,10 +553,10 @@ def read_availabilities(csv_name):
             if index == 0:
                 shifts = line_to_list(line)
                 for i in range(int(len(shifts) / SHIFTCSV)):
-                    SHIFTS.append(Shift(*[shifts[i * SHIFTCSV + i] for i in range(SHIFTCSV)]))
+                    SHIFTS.append(Shift(*[shifts[i * SHIFTCSV + j] for j in range(SHIFTCSV)]))
             elif index == 1:
                 persons = line_to_list(line)
-                for i in range(2, len(persons)):
+                for i in range(1, len(persons)):
                     PERSONS.append(Person(persons[i]))
             elif index == 2:
                 max_shifts = line_to_list(line)
@@ -470,7 +595,7 @@ parser.add_argument("-i", "--input", help="Input file path")
 RANDOM_SEED = 42
 random.seed(RANDOM_SEED)
 
-toolbox = base.Toolbox()
+# toolbox = base.Toolbox()
 
 if __name__ == "__main__":
 
@@ -484,56 +609,58 @@ if __name__ == "__main__":
         read_availabilities(file_name)
         rrsp = RoomResponsibleSchedulingProblem()
 
-        # define a single objective, maximizing fitness strategy:
-        creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+        # # define a single objective, maximizing fitness strategy:
+        # creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
+        #
+        # # create the Individual class based on list:
+        # creator.create("Individual", list, fitness=creator.FitnessMin)
+        #
+        # # create an operator that randomly returns 0 or 1:
+        # toolbox.register("zeroOrOne", random.randint, 0, 1)
+        #
+        # # create the individual operator to fill up an Individual instance:
+        # toolbox.register("individualCreator", tools.initRepeat, creator.Individual, toolbox.zeroOrOne, len(rrsp))
+        #
+        # # create the population operator to generate a list of individuals:
+        # toolbox.register("populationCreator", tools.initRepeat, list, toolbox.individualCreator)
+        #
+        #
+        # # fitness calculation
+        # def get_cost(individual):
+        #     return rrsp.get_cost(individual),  # return a tuple
+        #
+        #
+        # toolbox.register("evaluate", get_cost)
+        #
+        # # genetic operators:
+        # toolbox.register("select", tools.selTournament, tournsize=2)
+        # toolbox.register("mate", tools.cxTwoPoint)
+        # toolbox.register("mutate", tools.mutFlipBit, indpb=1.0 / len(rrsp))
+        #
+        # # create initial population (generation 0):
+        # population = toolbox.populationCreator(n=POPULATION_SIZE)
+        #
+        # # prepare the statistics object:
+        # stats = tools.Statistics(lambda ind: ind.fitness.values)
+        # stats.register("min", numpy.min)
+        # stats.register("avg", numpy.mean)
+        #
+        # # define the hall-of-fame object:
+        # hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
+        #
+        # # perform the Genetic Algorithm flow with hof feature added:
+        # population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
+        #                                              ngen=max_generations, stats=stats, halloffame=hof, verbose=True)
+        #
+        # # print best solution found:
+        # best = hof.items[0]
+        # print("-- Best Individual = ", best)
+        # print("-- Best Fitness = ", best.fitness.values[0])
+        # print()
+        # print("-- Schedule = ")
+        # rrsp.print_schedule_info(best)
 
-        # create the Individual class based on list:
-        creator.create("Individual", list, fitness=creator.FitnessMin)
-
-        # create an operator that randomly returns 0 or 1:
-        toolbox.register("zeroOrOne", random.randint, 0, 1)
-
-        # create the individual operator to fill up an Individual instance:
-        toolbox.register("individualCreator", tools.initRepeat, creator.Individual, toolbox.zeroOrOne, len(rrsp))
-
-        # create the population operator to generate a list of individuals:
-        toolbox.register("populationCreator", tools.initRepeat, list, toolbox.individualCreator)
-
-
-        # fitness calculation
-        def get_cost(individual):
-            return rrsp.get_cost(individual),  # return a tuple
-
-
-        toolbox.register("evaluate", get_cost)
-
-        # genetic operators:
-        toolbox.register("select", tools.selTournament, tournsize=2)
-        toolbox.register("mate", tools.cxTwoPoint)
-        toolbox.register("mutate", tools.mutFlipBit, indpb=1.0 / len(rrsp))
-
-        # create initial population (generation 0):
-        population = toolbox.populationCreator(n=POPULATION_SIZE)
-
-        # prepare the statistics object:
-        stats = tools.Statistics(lambda ind: ind.fitness.values)
-        stats.register("min", numpy.min)
-        stats.register("avg", numpy.mean)
-
-        # define the hall-of-fame object:
-        hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
-
-        # perform the Genetic Algorithm flow with hof feature added:
-        population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
-                                                     ngen=max_generations, stats=stats, halloffame=hof, verbose=True)
-
-        # print best solution found:
-        best = hof.items[0]
-        print("-- Best Individual = ", best)
-        print("-- Best Fitness = ", best.fitness.values[0])
-        print()
-        print("-- Schedule = ")
-        rrsp.print_schedule_info(best)
+        solve()
 
         for i in PERSONS:
             i.assign_from_bin()
