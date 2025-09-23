@@ -282,15 +282,15 @@ def solve():
 
     SHIFTSTOT = len(SHIFTS) * len(DATES)
 
-    N = []
-    B = []
+    N = [] # People with max shifts assigned
+    B = [] # Board members
 
     m = gp.Model("mip1")
 
     for j, person in enumerate(PERSONS):
         if person.get_is_board():
             B.append(j)
-        else:
+        if person.get_max_shifts() != -1:
             N.append(j)
 
     # Variables
@@ -298,8 +298,8 @@ def solve():
     b = m.addMVar(shape=SHIFTSTOT, vtype=GRB.INTEGER, name="b")
     x = m.addMVar(shape=(SHIFTSTOT, len(PERSONS)), vtype=GRB.BINARY, name="x")
     n = m.addMVar(shape=len(N), vtype=GRB.INTEGER, name="n")
-    bv = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="bv")
-    var = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="var")
+    # bv = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="bv")
+    # var = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="var")
 
     # Availability constraint
     for i in range(SHIFTSTOT):
@@ -326,8 +326,8 @@ def solve():
         m.addConstr(n[i] <= person.get_max_shifts(), f"maxshift_{j}")
         obj -= person.get_max_shifts()
 
-    for i, j in enumerate(B):
-        m.addConstr(grsum(get_column(x, j)) == bv[i], f"bv_{j}")
+    # for i, j in enumerate(B):
+    #     m.addConstr(grsum(get_column(x, j)) == bv[i], f"bv_{j}")
         # m.addConstr((bv[i] * len(B) + var[i]) == 2 * obj, f"boardvar_{j}")
 
     m.ModelSense = GRB.MAXIMIZE
