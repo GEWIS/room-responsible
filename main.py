@@ -127,18 +127,22 @@ class Date:
         return string
 
 class Shift:
-    def __init__(self, start, end, indicator):
+    def __init__(self, start, end, indicator, weight):
         self.start = datetime.strptime(start, "%H:%M:%S")
         self.end = datetime.strptime(end, "%H:%M:%S")
         self.indicator = indicator
         self.available_people = []
         self.assigned_people = []
+        self.weight = weight
 
     def __str__(self):
         string = f'Shift ({self.indicator}, {datetime.strftime(self.start, "%H:%M:%S")} - {datetime.strftime(self.end, "%H:%M:%S")}), filled by: '
         for i in self.assigned_people:
             string += f'{i.get_name()}, '
         return string
+
+    def set_weight(self, val):
+        self.weight = val
 
     def add_available_person(self, person):
         self.available_people.append(person)
@@ -157,6 +161,10 @@ class Shift:
 
     def get_end_time(self):
         return self.end
+
+    def get_weight(self):
+        return self.weight
+
 
 class RoomResponsibleSchedulingProblem:
     """This class encapsulates the Nurse Scheduling problem
@@ -279,27 +287,30 @@ class RoomResponsibleSchedulingProblem:
 import gurobipy as gp
 from gurobipy import GRB
 def solve():
-
+    global BIN_WEIGHTS
     SHIFTSTOT = len(SHIFTS) * len(DATES)
 
     N = [] # People with max shifts assigned
     B = [] # Board members
+    BI = [] # Board members with infinite shifts
 
     m = gp.Model("mip1")
 
     for j, person in enumerate(PERSONS):
         if person.get_is_board():
             B.append(j)
+            if person.get_max_shifts() == -1:
+                BI.append(j)
         if person.get_max_shifts() != -1:
             N.append(j)
+
 
     # Variables
     r = m.addMVar(shape=SHIFTSTOT, vtype=GRB.INTEGER, name="r")
     b = m.addMVar(shape=SHIFTSTOT, vtype=GRB.INTEGER, name="b")
     x = m.addMVar(shape=(SHIFTSTOT, len(PERSONS)), vtype=GRB.BINARY, name="x")
     n = m.addMVar(shape=len(N), vtype=GRB.INTEGER, name="n")
-    # bv = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="bv")
-    # var = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="var")
+    bv = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="bv")
 
     # Availability constraint
     for i in range(SHIFTSTOT):
@@ -318,33 +329,45 @@ def solve():
         m.addConstr(sum >= b[i], f"boardav_{i}")
         m.addConstr(sum >= b[i], f"boardav_{i}")
     
-    # Non board members get maximum their max shifts. 
-    obj = SHIFTSTOT
+    # People with a max shifts get maximum their max shifts. 
     for i, j in enumerate(N):
         person = PERSONS[j]
-        m.addConstr(grsum(get_column(x, j)) == n[i], f"n_{j}")
+        m.addConstr(wegrsum(get_column(x, j), BIN_WEIGHTS) == n[i], f"n_{j}")
         m.addConstr(n[i] <= person.get_max_shifts(), f"maxshift_{j}")
-        obj -= person.get_max_shifts()
 
-    # for i, j in enumerate(B):
-    #     m.addConstr(grsum(get_column(x, j)) == bv[i], f"bv_{j}")
-        # m.addConstr((bv[i] * len(B) + var[i]) == 2 * obj, f"boardvar_{j}")
+    for i, j in enumerate(B):
+        m.addConstr(wegrsum(get_column(x, j), BIN_WEIGHTS) == bv[i], f"bv_{j}")
 
+    # Mean (aux variable)
+    mean = m.addVar(lb=-GRB.INFINITY, name="mean")
+
+    # Constraint for mean
+    m.addConstr(mean == (1/len(BI)) * gp.quicksum(bv[i] for i in BI))
+
+    # Variance expression
+    variance = (1/len(BI)) * gp.quicksum((bv[i] - mean)*(bv[i] - mean) for i in BI)
+    # Objective: minimize variance
     m.ModelSense = GRB.MAXIMIZE
 
-    # m.setObjective(grsum(r) + grsum(b) - grsum(var), GRB.MAXIMIZE)
+    m.setObjective(grsum(r) + grsum(b) + grsum(n) - variance, GRB.MAXIMIZE)
+
     # Set maximization objectives
-    m.setObjectiveN(grsum(r), 0, 0)
-    m.setObjectiveN(grsum(b), 1, 1)
-    m.setObjectiveN(grsum(n), 2, 2)
+    # m.setObjectiveN(grsum(r), 0, 0)
+    # m.setObjectiveN(grsum(b), 1, 1)
+    # m.setObjectiveN(grsum(n), 2, 2)
+    # m.setObjectiveN(-variance, 3, 3)
     # m.setObjectiveN(-grsum(var), 2, 2)
 
     m.optimize()
 
-    # print(m.display())
+    print(m.display())
     
     for v in m.getVars():
-        print('%s %g' % (v.VarName, v.X))
+
+        try: 
+            print('%s %g' % (v.VarName, v.X))
+        except:
+            print('%s' % (v.VarName))
 
     bin_prefs = [[0 for _ in range(SHIFTSTOT)] for _ in range(len(PERSONS))]
     for v in m.getVars():
@@ -360,6 +383,12 @@ def grsum(x):
     obj = gp.LinExpr()
     for expr in x:
         obj += expr
+    return obj
+
+def wegrsum(x, weights):
+    obj = gp.LinExpr()
+    for i, expr in enumerate(x):
+        obj += weights[i] * expr
     return obj
 
 
@@ -525,6 +554,7 @@ def print_results():
 DATES = []
 PERSONS = []
 SHIFTS = []
+BIN_WEIGHTS = []
 NO_ONE = Person("Get Room Responsible")
 file_name = "availability.csv"
 
@@ -540,7 +570,7 @@ def read_availabilities(csv_name):
     SHIFTS = []
 
     # The amount of cells one Shift takes in the csv file
-    SHIFTCSV = 3
+    SHIFTCSV = 4
     # How many datacolumns each date has (date + is_exam currently) 
     DATEDATA = 2
     # How man rows of information before the dates start 
@@ -574,6 +604,8 @@ def read_availabilities(csv_name):
                 availabilities = line.split(';')[DATEDATA:]
                 for i in SHIFTS:
                     DATES[index - DATEDATASTART].add_shift(copy.deepcopy(i))
+                    BIN_WEIGHTS.append(i.get_weight())
+
                 for i, v in enumerate(availabilities):
                     for j in DATES[index - DATEDATASTART].get_shifts():
                         if j.get_indicator() in v:
