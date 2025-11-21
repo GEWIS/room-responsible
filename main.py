@@ -309,6 +309,7 @@ def solve():
     r = m.addMVar(shape=SHIFTSTOT, vtype=GRB.INTEGER, name="r")
     b = m.addMVar(shape=SHIFTSTOT, vtype=GRB.INTEGER, name="b")
     x = m.addMVar(shape=(SHIFTSTOT, len(PERSONS)), vtype=GRB.BINARY, name="x")
+    l = m.addMVar(shape=SHIFTSTOT//3, vtype=GRB.INTEGER, name="l")
     n = m.addMVar(shape=len(N), vtype=GRB.INTEGER, name="n")
     bv = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="bv")
 
@@ -328,7 +329,15 @@ def solve():
             sum += x[i][j]
         m.addConstr(sum >= b[i], f"boardav_{i}")
         m.addConstr(sum >= b[i], f"boardav_{i}")
-    
+
+    for i in range(0, SHIFTSTOT, 3):
+        l1 = rowmult(x[i], x[i+1])
+        l2 = rowmult(x[i+2], x[i+1])
+        l3 = rowmult(l1, l2)
+        l4 = grsum(l1) + grsum(l2) - grsum(l3)
+        m.addConstr(l[i // 3] == l4, f"l_{i//3}")
+        # m.addConstr(l[i // 3] <= 1, f"ltop_{i//3}")
+         
     # People with a max shifts get maximum their max shifts. 
     for i, j in enumerate(N):
         person = PERSONS[j]
@@ -342,14 +351,14 @@ def solve():
     mean = m.addVar(lb=-GRB.INFINITY, name="mean")
 
     # Constraint for mean
-    m.addConstr(mean == (1/len(BI)) * gp.quicksum(bv[i] for i in BI))
+    m.addConstr(mean == (1/len(B)) * gp.quicksum(bv[i] for i in B))
 
     # Variance expression
-    variance = (1/len(BI)) * gp.quicksum((bv[i] - mean)*(bv[i] - mean) for i in BI)
+    variance = (1/len(B)) * gp.quicksum((bv[i] - mean)*(bv[i] - mean) for i in B)
     # Objective: minimize variance
     m.ModelSense = GRB.MAXIMIZE
 
-    m.setObjective(grsum(r) + grsum(b) + grsum(n) - variance, GRB.MAXIMIZE)
+    m.setObjective(3 * grsum(r) + grsum(b) + grsum(n) + grsum(l) - variance, GRB.MAXIMIZE)
 
     # Set maximization objectives
     # m.setObjectiveN(grsum(r), 0, 0)
@@ -360,7 +369,7 @@ def solve():
 
     m.optimize()
 
-    print(m.display())
+    # print(m.display())
     
     for v in m.getVars():
 
@@ -378,11 +387,20 @@ def solve():
 
     for i in range(len(PERSONS)):
         PERSONS[i].set_bin_assignment(bin_prefs[i])
+        print(PERSONS[i].get_bin_assignment())
+        print(len([x for i, x in enumerate(PERSONS[i].get_bin_assignment()) if i % 3 == 1]))
 
 def grsum(x):
     obj = gp.LinExpr()
     for expr in x:
         obj += expr
+    return obj
+
+def rowmult(x1, x2):
+    # obj = gp.LinExpr()
+    obj = []
+    for i, j in zip(x1, x2):
+        obj.append(i * j)
     return obj
 
 def wegrsum(x, weights):
@@ -391,8 +409,7 @@ def wegrsum(x, weights):
         obj += weights[i] * expr
     return obj
 
-
-def get_column(x, i):
+def get_column(x, i) -> list:
     return [row[i] for row in x]
 
 
@@ -591,7 +608,7 @@ def read_availabilities(csv_name):
             elif index == 2:
                 max_shifts = line_to_list(line)
                 for i in range(1, len(max_shifts)):
-                    PERSONS[i - 1].set_max_shifts(int(max_shifts[i]))
+                    PERSONS[i - 1].set_max_shifts(int(max_shifts[i]) if int(max_shifts[i]) == -1 else int(max_shifts[i]) * 4)
             elif index == 3:
                 board = line_to_list(line)
                 for i in range(1, len(board)):
