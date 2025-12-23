@@ -12,6 +12,7 @@ from icalendar import Calendar, Event
 import random
 import numpy
 import argparse
+import pulp
 
 class Person:
     def __init__(self, name):
@@ -133,7 +134,7 @@ class Shift:
         self.indicator = indicator
         self.available_people = []
         self.assigned_people = []
-        self.weight = weight
+        self.weight = int(weight)
 
     def __str__(self):
         string = f'Shift ({self.indicator}, {datetime.strftime(self.start, "%H:%M:%S")} - {datetime.strftime(self.end, "%H:%M:%S")}), filled by: '
@@ -284,6 +285,212 @@ class RoomResponsibleSchedulingProblem:
             print(f'{person.get_name()}: {sum(shifts_dict[person.get_name()])}')
 
 
+def solvepulp():
+    global BIN_WEIGHTS
+    SHIFTSTOT = len(SHIFTS) * len(DATES)
+
+    N = [] # People with max shifts assigned
+    B = [] # Board members
+    BI = [] # Board members with infinite shifts
+
+    ma = pulp.LpProblem(name="rrc", sense=pulp.LpMaximize)
+
+    for j, person in enumerate(PERSONS):
+        if person.get_is_board():
+            B.append(j)
+            if person.get_max_shifts() == -1:
+                BI.append(j)
+        if person.get_max_shifts() != -1:
+            N.append(j)
+
+
+    # Variables
+    r = [pulp.LpVariable(name=f"r_{i}", cat=pulp.LpInteger, lowBound=0) for i in range(SHIFTSTOT)]
+    b = [pulp.LpVariable(name=f"b_{i}", cat=pulp.LpInteger, lowBound=0) for i in range(SHIFTSTOT)]
+    x = [[pulp.LpVariable(name=f"x_{i}_{j}", cat=pulp.LpBinary, lowBound=0, upBound=1) for j in range(len(PERSONS))] for i in range(SHIFTSTOT)]
+    l = [[pulp.LpVariable(name=f"l_{i}_{j}", cat=pulp.LpInteger, lowBound=0) for j in range(len(PERSONS) + 1)] for i in range(SHIFTSTOT//3)]
+    n = [pulp.LpVariable(name=f"n_{i}", cat=pulp.LpInteger, lowBound=0) for i in range(len(N))]
+    bv = [pulp.LpVariable(name=f"bv_{i}", cat=pulp.LpInteger, lowBound=0) for i in range(len(B))]
+    mean = pulp.LpVariable(name="mean", cat=pulp.LpInteger, lowBound=0)
+
+    # Availability constraint
+    for i in range(SHIFTSTOT):
+        for j, person in enumerate(PERSONS):
+            ma += (x[i][j] <= person.get_bin_preference()[i], f"available_{i}_{j}")
+
+
+    for i in range(SHIFTSTOT):
+        # Extra variable for people assigned to shift
+        ma += (pulp.lpSum(x[i]) == r[i], f"rge_{i}")
+        ma += (r[i] <= 2, f"ass_1_{i}")
+
+        # All shifts have at least one board member
+        sum = pulp.lpSum([x[i][j] for j in B])
+        ma += (sum >= b[i], f"boardav_{i}")
+
+    for i in range(0, SHIFTSTOT, 3):
+        for j in range(len(PERSONS)):
+            xm = pulp.lpSum([x[i][j], x[i+1][j], x[i+1][j], x[i+2][j]])
+            a = 3
+            A = 4
+            ma += (0 <= xm, f"l_{i//3}_{j}_1")
+            ma += (xm <= a * l[i//3][j], f"l_{i//3}_{j}_2")
+            ma += (a + A * (l[i//3][j] - 1) <= xm, f"l_{i//3}_{j}_3") 
+            ma += (xm <= a + A * (l[i//3][j]) - 1, f"l_{i//3}_{j}_4") 
+        ma += (l[i//3][-1] == pulp.lpSum(l[i//3][:-1]), f"l_{i//3}")
+         
+    # People with a max shifts get maximum their max shifts. 
+    for i, j in enumerate(N):
+        person = PERSONS[j]
+        c = pulp.LpAffineExpression([(expr, BIN_WEIGHTS[i]) for i, expr in enumerate(get_column(x, j))])
+        ma += (c == n[i], f"n_{j}")
+        # ma += (pulp.lpSum([BIN_WEIGHTS[i] * expr for i, expr in enumerate(get_column(x, j))] == n[i], f"bv_{j}"))
+        ma += (n[i] <= person.get_max_shifts(), f"maxshift_{j}")
+
+    for i, j in enumerate(B):
+        c = pulp.LpAffineExpression([(expr, BIN_WEIGHTS[i]) for i, expr in enumerate(get_column(x, j))])
+        ma += (c == bv[i], f"bv_{j}")
+        # ma += (pulp.lpSum([BIN_WEIGHTS[i] * expr for i, expr in enumerate(get_column(x, j))] == bv[i], f"bv_{j}"))
+
+    # ma += (mean == (1/len(B)) * pulp.lpSum(bv[i] for i in B))
+    #
+    # variance = (1/len(B)) * pulp.lpSum((bv[i] - mean)*(bv[i] - mean) for i in B)
+
+    ma += 5 * pulp.lpSum(r) + pulp.lpSum(b) + pulp.lpSum(n)# + pulp.lpSum([l[i//3][-1] for i in range(0, SHIFTSTOT, 3)])# - variance
+
+    ma.writeLP("NameofFile.lp")
+    ma.solve()
+
+    print(f"status: {ma.status}, {pulp.LpStatus[ma.status]}")
+    print(f"objective: {ma.objective.value()}")
+
+    # for name, constraint in ma.constraints.items():
+    #     print(f"{name}: {constraint.value()}")
+    
+    for v in get_column(l, -1):
+        try: 
+            print('%s %g' % (v.name, v.value()))
+        except:
+            print('%s' % (v.name))
+    
+    bin_prefs = [[0 for _ in range(SHIFTSTOT)] for _ in range(len(PERSONS))]
+    for v in flatten(x):
+        index = re.split(r'_', v.name)
+        if (index[0] == "x"):
+            shift, person = int(index[1]), int(index[2])
+            bin_prefs[person][shift] = int(v.value())
+    #
+    for i in range(len(PERSONS)):
+        PERSONS[i].set_bin_assignment(bin_prefs[i])
+        print(PERSONS[i].get_bin_assignment())
+        print(len([x for i, x in enumerate(PERSONS[i].get_bin_assignment()) if i % 3 == 1]))
+
+
+def flatten(xss):
+    return [x for xs in xss for x in xs]
+
+from pyscipopt import Model, quicksum, recipes
+from pyscipopt.recipes import nonlinear
+def solvescip():
+    global BIN_WEIGHTS
+    SHIFTSTOT = len(SHIFTS) * len(DATES)
+
+    N = [] # People with max shifts assigned
+    B = [] # Board members
+    BI = [] # Board members with infinite shifts
+
+    m = Model()
+
+    for j, person in enumerate(PERSONS):
+        if person.get_is_board():
+            B.append(j)
+            if person.get_max_shifts() == -1:
+                BI.append(j)
+        if person.get_max_shifts() != -1:
+            N.append(j)
+
+
+    # Variables
+    r = [m.addVar(vtype="I", name=f"r_{i}") for i in range(SHIFTSTOT)]
+    b = [m.addVar(vtype="I", name=f"b_{i}") for i in range(SHIFTSTOT)]
+    x = [[m.addVar(vtype="B", name=f"x_{i}_{j}") for j in range(len(PERSONS))] for i in range(SHIFTSTOT)]
+    # x = m.addMVar(shape=(SHIFTSTOT, len(PERSONS)), vtype="B", name="x")
+    l = [m.addVar(vtype="I", name=f"l_{i}") for i in range(SHIFTSTOT//3)]
+    n = [m.addVar(vtype="I", name=f"n_{i}") for i in range(len(N))]
+    bv = [m.addVar(vtype="I", name=f"bv_{i}") for i in range(len(B))]
+    mean = m.addVar(lb=-GRB.INFINITY, name="mean")
+
+    # Availability constraint
+    for i in range(SHIFTSTOT):
+        for j, person in enumerate(PERSONS):
+            m.addCons(x[i][j] <= person.get_bin_preference()[i], f"available_{i}_{j}")
+
+
+    for i in range(SHIFTSTOT):
+        # Extra variable for people assigned to shift
+        m.addCons(quicksum(x[i]) == r[i], f"rge_{i}")
+        m.addCons(r[i] <= 2, f"ass_1_{i}")
+
+        # All shifts have at least one board member
+        sum = quicksum([x[i][j] for j in B])
+        m.addCons(sum >= b[i], f"boardav_{i}")
+
+    for i in range(0, SHIFTSTOT, 3):
+        l1 = rowmult(x[i], x[i+1])
+        l2 = rowmult(x[i+2], x[i+1])
+        l3 = rowmult(l1, l2)
+        l4 = quicksum(l1) + quicksum(l2) - quicksum(l3)
+        m.addCons(l[i // 3] == l4, f"l_{i//3}")
+        # m.addConstr(l[i // 3] <= 1, f"ltop_{i//3}")
+         
+    # People with a max shifts get maximum their max shifts. 
+    for i, j in enumerate(N):
+        person = PERSONS[j]
+        m.addCons(wegrsum(get_column(x, j), BIN_WEIGHTS) == n[i], f"n_{j}")
+        m.addCons(n[i] <= person.get_max_shifts(), f"maxshift_{j}")
+
+    for i, j in enumerate(B):
+        m.addCons(wegrsum(get_column(x, j), BIN_WEIGHTS) == bv[i], f"bv_{j}")
+
+    # Constraint for mean
+    m.addCons(mean == (1/len(B)) * quicksum(bv[i] for i in B))
+
+    # Variance expression
+    variance = (1/len(B)) * quicksum((bv[i] - mean)*(bv[i] - mean) for i in B)
+    # Objective: minimize variance
+
+    # m.setObjective(5 * quicksum(r) + quicksum(b) + quicksum(n) + quicksum(l) - variance, sense='maximize')
+    nonlinear.set_nonlinear_objective(m, 5 * quicksum(r) + quicksum(b) + quicksum(n) + quicksum(l) - variance, sense='maximize')
+
+    # Set maximization objectives
+    # m.setObjectiveN(grsum(r), 0, 0)
+    # m.setObjectiveN(grsum(b), 1, 1)
+    # m.setObjectiveN(grsum(n), 2, 2)
+    # m.setObjectiveN(-variance, 3, 3)
+    # m.setObjectiveN(-grsum(var), 2, 2)
+
+    m.optimize()
+
+    # print(m.display())
+    
+    for v in m.getVars():
+        try: 
+            print('%s %g' % (v, m.getVal(v)))
+        except:
+            print('%s' % (v))
+
+    bin_prefs = [[0 for _ in range(SHIFTSTOT)] for _ in range(len(PERSONS))]
+    for v in m.getVars():
+        index = re.split(r'_', str(v))
+        if (index[0] == "x"):
+            shift, person = int(index[1]), int(index[2])
+            bin_prefs[person][shift] = int(m.getVal(v))
+
+    for i in range(len(PERSONS)):
+        PERSONS[i].set_bin_assignment(bin_prefs[i])
+        print(PERSONS[i].get_bin_assignment())
+        print(len([x for i, x in enumerate(PERSONS[i].get_bin_assignment()) if i % 3 == 1]))
+
 import gurobipy as gp
 from gurobipy import GRB
 def solve():
@@ -312,15 +519,17 @@ def solve():
     l = m.addMVar(shape=SHIFTSTOT//3, vtype=GRB.INTEGER, name="l")
     n = m.addMVar(shape=len(N), vtype=GRB.INTEGER, name="n")
     bv = m.addMVar(shape=len(B), vtype=GRB.INTEGER, name="bv")
+    mean = m.addVar(lb=-GRB.INFINITY, name="mean")
 
     # Availability constraint
     for i in range(SHIFTSTOT):
         for j, person in enumerate(PERSONS):
             m.addConstr(x[i][j] <= person.get_bin_preference()[i], f"available_{i}_{j}")
 
+
     for i in range(SHIFTSTOT):
         # Extra variable for people assigned to shift
-        m.addConstr(grsum(x[i]) == r[i], f"rge_{i}")
+        m.addConstr(gp.quicksum(x[i]) == r[i], f"rge_{i}")
         m.addConstr(r[i] <= 2, f"ass_1_{i}")
 
         # All shifts have at least one board member
@@ -328,13 +537,12 @@ def solve():
         for j in B:
             sum += x[i][j]
         m.addConstr(sum >= b[i], f"boardav_{i}")
-        m.addConstr(sum >= b[i], f"boardav_{i}")
 
     for i in range(0, SHIFTSTOT, 3):
         l1 = rowmult(x[i], x[i+1])
         l2 = rowmult(x[i+2], x[i+1])
         l3 = rowmult(l1, l2)
-        l4 = grsum(l1) + grsum(l2) - grsum(l3)
+        l4 = gp.quicksum(l1) + gp.quicksum(l2) - gp.quicksum(l3)
         m.addConstr(l[i // 3] == l4, f"l_{i//3}")
         # m.addConstr(l[i // 3] <= 1, f"ltop_{i//3}")
          
@@ -347,9 +555,6 @@ def solve():
     for i, j in enumerate(B):
         m.addConstr(wegrsum(get_column(x, j), BIN_WEIGHTS) == bv[i], f"bv_{j}")
 
-    # Mean (aux variable)
-    mean = m.addVar(lb=-GRB.INFINITY, name="mean")
-
     # Constraint for mean
     m.addConstr(mean == (1/len(B)) * gp.quicksum(bv[i] for i in B))
 
@@ -358,7 +563,7 @@ def solve():
     # Objective: minimize variance
     m.ModelSense = GRB.MAXIMIZE
 
-    m.setObjective(3 * grsum(r) + grsum(b) + grsum(n) + grsum(l) - variance, GRB.MAXIMIZE)
+    m.setObjective(5 * gp.quicksum(r) + gp.quicksum(b) + gp.quicksum(n) + gp.quicksum(l) - variance, GRB.MAXIMIZE)
 
     # Set maximization objectives
     # m.setObjectiveN(grsum(r), 0, 0)
@@ -390,11 +595,11 @@ def solve():
         print(PERSONS[i].get_bin_assignment())
         print(len([x for i, x in enumerate(PERSONS[i].get_bin_assignment()) if i % 3 == 1]))
 
-def grsum(x):
-    obj = gp.LinExpr()
-    for expr in x:
-        obj += expr
-    return obj
+# def grsum(x):
+#     obj = gp.LinExpr()
+#     for expr in x:
+#         obj += expr
+#     return obj
 
 def rowmult(x1, x2):
     # obj = gp.LinExpr()
@@ -404,7 +609,7 @@ def rowmult(x1, x2):
     return obj
 
 def wegrsum(x, weights):
-    obj = gp.LinExpr()
+    obj = 0
     for i, expr in enumerate(x):
         obj += weights[i] * expr
     return obj
@@ -412,93 +617,6 @@ def wegrsum(x, weights):
 def get_column(x, i) -> list:
     return [row[i] for row in x]
 
-
-    # TO_SOLVE = []
-    # # First check if some dates have to be filled in some way.
-    # for shift in SHIFTS:
-    #     av = len(shift.available_people)
-    #     match av:
-    #         case 0:
-    #             shift.assign_person(copy.deepcopy(NO_ONE))
-    #         case 1:
-    #             shift.assign_person(shift.available_people[0])
-    #             shift.assign_person(copy.deepcopy(NO_ONE))
-    #
-    #             shift.available_people[0].increment_assigned()
-    #         case 2:
-    #             shift.assign_person(shift.available_people[0])
-    #             shift.assign_person(shift.available_people[1])
-    #
-    #             shift.available_people[0].increment_assigned()
-    #             shift.available_people[1].increment_assigned()
-    #         case _:
-    #             TO_SOLVE.append(shift)
-
-    
-
-    # Now that that has been done, we should fill up per week (maximum shifts)
-    # Then we fill any slots with RRC members that want to fill in. 
-        # Sidenote, you have to check that it works out in the end. 
-
-
-def ea_simple_with_elitism(population, toolbox, cxpb, mutpb, ngen, stats=None,
-                           halloffame=None, verbose=__debug__):
-    """This algorithm is similar to DEAP eaSimple() algorithm, with the modification that
-    halloffame is used to implement an elitism mechanism. The individuals contained in the
-    halloffame are directly injected into the next generation and are not subject to the
-    genetic operators of selection, crossover and mutation.
-    """
-    logbook = tools.Logbook()
-    logbook.header = ['gen', 'nevals'] + (stats.fields if stats else [])
-
-    # Evaluate the individuals with an invalid fitness
-    invalid_ind = [ind for ind in population if not ind.fitness.valid]
-    fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
-    for ind, fit in zip(invalid_ind, fitnesses):
-        ind.fitness.values = fit
-
-    if halloffame is None:
-        raise ValueError("halloffame parameter must not be empty!")
-
-    halloffame.update(population)
-    hof_size = len(halloffame.items) if halloffame.items else 0
-
-    record = stats.compile(population) if stats else {}
-    logbook.record(gen=0, nevals=len(invalid_ind), **record)
-    if verbose:
-        print(logbook.stream)
-
-    # Begin the generational process
-    for gen in range(1, ngen + 1):
-
-        # Select the next generation individuals
-        offspring = toolbox.select(population, len(population) - hof_size)
-
-        # Vary the pool of individuals
-        offspring = algorithms.varAnd(offspring, toolbox, cxpb, mutpb)
-
-        # Evaluate the individuals with an invalid fitness
-        invalid_ind = [ind for ind in offspring if not ind.fitness.valid]
-        fitnesses = toolbox.map(toolbox.evaluate, invalid_ind)
-        for ind, fit in zip(invalid_ind, fitnesses):
-            ind.fitness.values = fit
-
-        # add the best back to population:
-        offspring.extend(halloffame.items)
-
-        # Update the hall of fame with the generated individuals
-        halloffame.update(offspring)
-
-        # Replace the current population by the offspring
-        population[:] = offspring
-
-        # Append the current generation statistics to the logbook
-        record = stats.compile(population) if stats else {}
-        logbook.record(gen=gen, nevals=len(invalid_ind), **record)
-        if verbose:
-            print(logbook.stream)
-
-    return population, logbook
 
 def get_person_by_name(name):
     global PERSONS
@@ -631,26 +749,13 @@ def read_availabilities(csv_name):
                         else:
                             PERSONS[i].bin_preference.append(0)
 
-# Genetic Algorithm constants:
-POPULATION_SIZE = 300
-P_CROSSOVER = 0.9  # probability for crossover
-P_MUTATION = 0.4  # probability for mutating an individual
-max_generations = 2000
-HALL_OF_FAME_SIZE = 30
 parser = argparse.ArgumentParser(description="List of arguments")
-parser.add_argument("-g", "--generations", help = "How many generations should be run")
 parser.add_argument("-i", "--input", help="Input file path")
 # set the random seed:
-RANDOM_SEED = 42
-random.seed(RANDOM_SEED)
-
-# toolbox = base.Toolbox()
 
 if __name__ == "__main__":
 
     args = parser.parse_args()
-    if args.generations:
-        max_generations = int(args.generations)
     if args.input:
         file_name = args.input
 
@@ -658,58 +763,9 @@ if __name__ == "__main__":
         read_availabilities(file_name)
         rrsp = RoomResponsibleSchedulingProblem()
 
-        # # define a single objective, maximizing fitness strategy:
-        # creator.create("FitnessMin", base.Fitness, weights=(-1.0,))
-        #
-        # # create the Individual class based on list:
-        # creator.create("Individual", list, fitness=creator.FitnessMin)
-        #
-        # # create an operator that randomly returns 0 or 1:
-        # toolbox.register("zeroOrOne", random.randint, 0, 1)
-        #
-        # # create the individual operator to fill up an Individual instance:
-        # toolbox.register("individualCreator", tools.initRepeat, creator.Individual, toolbox.zeroOrOne, len(rrsp))
-        #
-        # # create the population operator to generate a list of individuals:
-        # toolbox.register("populationCreator", tools.initRepeat, list, toolbox.individualCreator)
-        #
-        #
-        # # fitness calculation
-        # def get_cost(individual):
-        #     return rrsp.get_cost(individual),  # return a tuple
-        #
-        #
-        # toolbox.register("evaluate", get_cost)
-        #
-        # # genetic operators:
-        # toolbox.register("select", tools.selTournament, tournsize=2)
-        # toolbox.register("mate", tools.cxTwoPoint)
-        # toolbox.register("mutate", tools.mutFlipBit, indpb=1.0 / len(rrsp))
-        #
-        # # create initial population (generation 0):
-        # population = toolbox.populationCreator(n=POPULATION_SIZE)
-        #
-        # # prepare the statistics object:
-        # stats = tools.Statistics(lambda ind: ind.fitness.values)
-        # stats.register("min", numpy.min)
-        # stats.register("avg", numpy.mean)
-        #
-        # # define the hall-of-fame object:
-        # hof = tools.HallOfFame(HALL_OF_FAME_SIZE)
-        #
-        # # perform the Genetic Algorithm flow with hof feature added:
-        # population, logbook = ea_simple_with_elitism(population, toolbox, cxpb=P_CROSSOVER, mutpb=P_MUTATION,
-        #                                              ngen=max_generations, stats=stats, halloffame=hof, verbose=True)
-        #
-        # # print best solution found:
-        # best = hof.items[0]
-        # print("-- Best Individual = ", best)
-        # print("-- Best Fitness = ", best.fitness.values[0])
-        # print()
-        # print("-- Schedule = ")
-        # rrsp.print_schedule_info(best)
-
-        solve()
+        # solve()
+        # solvepulp()
+        solvescip()
 
         for i in PERSONS:
             i.assign_from_bin()
